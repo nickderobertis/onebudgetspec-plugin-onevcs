@@ -11,13 +11,12 @@ set positional-arguments
 _nx_base_input := env_var_or_default("NX_BASE", "origin/main")
 base := if _nx_base_input =~ '^[A-Za-z0-9._/-]+$' { _nx_base_input } else { error("NX_BASE must be a plain git ref or SHA — letters, digits and . _ / - only; got: " + _nx_base_input) }
 
-# List available recipes.
 default:
     @just --list
 
 # Set up from a clean clone: the locked crates, Nx's locked Node toolchain, the pinned
-# Rust toolchain, and cargo-llvm-cov and cargo-nextest.
-bootstrap: fetch
+# Rust toolchain, and cargo-llvm-cov.
+bootstrap: fetch setup-onevcs
     @bash scripts/bootstrap.sh
 
 # The full gate at a tier: `affected` (default) is what a change can reach; `all` is the
@@ -25,15 +24,15 @@ bootstrap: fetch
 # (unit, release wiring, the e2e journeys that spawn the built binary) with the 95%
 # line-coverage floor over every crate's run, and the builds. Fails on any issue.
 check tier="affected": (budgets tier)
-    {{ if tier == "all" { "bunx nx run-many" } else if tier == "affected" { "bunx nx affected --base=" + base } else { error("unknown tier '" + tier + "' — use 'affected' (the default) or 'all'") } }} -t format-check lint test build --outputStyle=static
+    {{ if tier == "all" { "bunx nx run-many" } else if tier == "affected" { "bunx nx affected --base=" + base } else { error("unknown tier '" + tier + "' — use 'affected' (the default) or 'all'") } }} -t format-check lint test build --exclude=install --outputStyle=static
     bunx nx run workspace:coverage --excludeTaskDependencies --outputStyle=static
 
 # The tests the affected tier reaches, then the coverage floor over their runs.
 test:
-    bunx nx affected --base={{ base }} -t test --outputStyle=static
+    bunx nx affected --base={{ base }} -t test --exclude=install --outputStyle=static
     bunx nx run workspace:coverage --excludeTaskDependencies --outputStyle=static
 
-# Every Rust test, instrumented, then the coverage floor over the union of their runs.
+# Instrument the workspace suites and enforce the aggregate coverage floor.
 coverage:
     bunx nx run workspace:coverage --outputStyle=static
 
@@ -48,10 +47,10 @@ fetch:
 # The end-user install path: package the crate as crates.io would serve it, install it
 # locked into an empty root, run the installed binary. Its own CI job, outside `check`.
 install-smoke:
-    @bash tools/install/smoke.sh
+    bunx nx run install:test --outputStyle=static
 
-# Lint and type check the projects this change can reach: clippy -D warnings, cargo
-# check, shellcheck, actionlint and the project-boundary check.
+# Lint and type check the projects this change can reach: clippy -D warnings,
+# actionlint and the project-boundary check.
 lint:
     bunx nx affected --base={{ base }} -t lint typecheck --outputStyle=static
 
@@ -90,7 +89,6 @@ session-setup:
 setup-llmlint:
     ./scripts/setup-llmlint.sh
 
-# Out of the deterministic gate: these need an authenticated harness and the network.
 
 # LLM-judge lint over the configured set (or the paths given).
 lint-llm *paths:
@@ -113,3 +111,15 @@ budgets tier="affected":
     {{ if tier == "all" { "bunx nx run-many" } else if tier == "affected" { "bunx nx affected --base=" + base } else { error("unknown tier '" + tier + "' — use 'affected' (the default) or 'all'") } }} -t budgets budgets-host
     [ ! -f budgets.yaml ] || bunx onebudgetspec check budgets.yaml
 
+
+# Locked graph dependencies shared by bootstrap and the isolated CI install job.
+dependencies:
+    @bun install --frozen-lockfile
+
+# Repository-test prerequisite, pinned once for local development and CI.
+setup-onevcs:
+    @version="$(cat tools/onevcs.version)"; [ "$(onevcs --version 2>/dev/null || true)" = "onevcs $version" ] || uv tool install --quiet --upgrade "onevcs-cli==$version"
+
+# Go verifies the pinned installer module against its checksum database.
+setup-actionlint:
+    @GOBIN="$HOME/.local/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$(cat tools/actionlint.version)"

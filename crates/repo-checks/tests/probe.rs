@@ -215,3 +215,79 @@ fn declaration_and_three_answers_round_trip_through_real_onevcs() {
     assert!(!unknown.status.success());
     assert!(!unknown.stderr.is_empty());
 }
+
+#[test]
+fn malformed_declarations_usage_and_registry_documents_are_refused() {
+    let f = Fixture::new();
+    let name = f.id.strip_prefix("crate:").unwrap();
+    for (status, body) in [
+        ("503", "unavailable".to_owned()),
+        ("abc", "{}".to_owned()),
+        ("200", "{}".to_owned()),
+        ("200", "[]".to_owned()),
+        (
+            "200",
+            r#"{"crate":{"id":"another","max_stable_version":"1.0.0"}}"#.to_owned(),
+        ),
+        ("200", format!(r#"{{"crate":{{"id":"{name}"}}}}"#)),
+        (
+            "200",
+            format!(r#"{{"crate":{{"id":"{name}","max_stable_version":12}}}}"#),
+        ),
+        (
+            "200",
+            format!(r#"{{"crate":{{"id":"{name}","max_stable_version":"1.2"}}}}"#),
+        ),
+        (
+            "200",
+            format!(r#"{{"crate":{{"id":"{name}","max_stable_version":"1.2.3-rc.1"}}}}"#),
+        ),
+    ] {
+        f.registry(status, &body, false);
+        let output = f.ask(&f.id);
+        assert!(!output.status.success(), "{status} {body}: {output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("release probe:"));
+    }
+    f.registry(
+        "200",
+        &format!(r#"{{"crate":{{"id":"{name}","max_stable_version":"1.2.3+build.4"}}}}"#),
+        false,
+    );
+    let output = f.ask(&f.id);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1.2.3+build.4\n");
+    for args in [vec![], vec![&f.id, &f.id]] {
+        let output = Command::new(f.repo.join(&f.probe))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("expected one declared"));
+    }
+    let path = f.repo.join("release-targets.toml");
+    let declaration = fs::read_to_string(&path).unwrap();
+    for replacement in [
+        None,
+        Some("not [ valid TOML".to_owned()),
+        Some(declaration.replace(&f.id, "pypi:test")),
+    ] {
+        match replacement.as_ref() {
+            Some(text) => fs::write(&path, text).unwrap(),
+            None => fs::remove_file(&path).unwrap(),
+        };
+        let id = if replacement
+            .as_ref()
+            .is_some_and(|s| s.contains("pypi:test"))
+        {
+            "pypi:test"
+        } else {
+            &f.id
+        };
+        let output = f.ask(id);
+        assert!(!output.status.success());
+        assert!(!output.stderr.is_empty());
+        assert!(output.stdout.is_empty());
+        fs::write(&path, &declaration).unwrap();
+    }
+}

@@ -32,9 +32,31 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cargo test -p repo-checks --locked"
+        "command": "bash tools/coverage.sh repo-checks"
       },
-      "cache": false
+      "cache": false,
+      "dependsOn": [
+        "workspace:coverage-clear"
+      ],
+      "outputs": [
+        "{workspaceRoot}/target/llvm-cov-target"
+      ],
+      "inputs": [
+        "default",
+        "{workspaceRoot}/.github/workflows/**/*",
+        "{workspaceRoot}/scripts/**/*",
+        "{workspaceRoot}/tools/**/*",
+        "{workspaceRoot}/release*.toml",
+        "{workspaceRoot}/gh-secrets.json",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/AGENTS.md",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/**/project.json",
+        "{workspaceRoot}/nx.json"
+      ]
     }
-  }
+  },
+  "implicitDependencies": [
+    "workspace"
+  ]
 }

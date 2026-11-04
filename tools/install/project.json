@@ -4,12 +4,15 @@
     "type:tooling"
   ],
   "targets": {
-    "install": {
+    "test": {
       "executor": "nx:run-commands",
       "options": {
         "command": "bash tools/install/smoke.sh"
       },
       "cache": false
     }
-  }
+  },
+  "implicitDependencies": [
+    "onebudgetspec-plugin-onevcs"
+  ]
 }

@@ -20,10 +20,12 @@ material improvements outside the task as follow-ups.
 
 - **Product shape:** cli, supplemented with library guidance.
 - **Language(s):** rust
+<!-- llmlint: ignore-block[agents_md_durable_and_terse] The task and create-repo require the emitted references and composition invocation here so future maintainers can reproduce the baseline and review optional exclusions. -->
 - **References composed:** base.md, project-graph.md, shapes/cli.md,
   languages/rust.md, intersections/rust-cli.md, ci.md, llmlint.md, releasing.md,
   tools/onebudgetspec.md; supplemented with shapes/library.md from dero-skills
   create-repo v1.52.0. Composed with `--shape cli --language rust --releasing`.
+<!-- llmlint: ignore-end[agents_md_durable_and_terse] -->
 - **Projects in the graph:** published crate, binary e2e leaf, repository checks,
   packaged install journey, and workspace tooling. The e2e depends only on the
   binary build; repository contracts have their own tests.
@@ -41,10 +43,9 @@ material improvements outside the task as follow-ups.
 
 ## Command surface
 
-Use `just --list`. Bootstrap is clean-clone setup; check runs affected Nx targets
-against an explicit base, including tests/e2e and aggregate 95% line coverage.
-The full sweep runs at release-prep on release PRs; ordinary PRs and main pushes
-use the affected tier. No later release operation re-gates that tree.
+Use `just --list`. The full sweep belongs at release-prep on release PRs; ordinary
+PRs and main pushes use the affected tier. The separate install job proves
+packaging once per platform. No later release operation re-gates that tree.
 Judged lint stays separate from the deterministic gate. Keep the narrow command
 allowlist current when adding routine commands.
 
@@ -65,9 +66,7 @@ release chain. Nobody hand-edits versions, tags or deploys.
 
 Validate inputs at trust boundaries, keep permissions narrow, and never store
 credentials. Tests drive real boundaries, happy and failure paths; only external
-registries are doubled. The binary journey verifies help, metadata version,
-invalid arguments, and unchanged working files; the install journey repeats it
-outside the checkout. Repository tests drive the declared probe and onevcs.
+registries are doubled.
 Coverage is a floor, not a replacement for realistic journeys.
 
 A cost figure belongs in onebudgetspec, not a test threshold; wall-clock tests
@@ -76,6 +75,5 @@ assertions. Add budgets from measurements, not invented limits.
 
 Scripts should be quiet on success and give the exact failure and next action.
 Fix findings at their site; any narrowly justified suppression must explain why.
-Provider credentials are needed for the separate CI llmlint check. Release PR
-creation awaits the PAT; publication awaits PAT and crates credentials. See
-[README](README.md) for the user-run secret setup; never sync secrets implicitly.
+See [README](README.md) for credential-dependent checks and user-run secret
+setup; never sync secrets implicitly.

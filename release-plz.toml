@@ -1,5 +1,6 @@
 [workspace]
 release_always = true
+features_always_increment_minor = true
 release_commits = "^(feat|fix|perf|refactor|build)(\\([^)]+\\))?!?:"
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
