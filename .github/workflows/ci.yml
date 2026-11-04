@@ -99,6 +99,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
       - run: just fetch
       - run: just install-smoke
 

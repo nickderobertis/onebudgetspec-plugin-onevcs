@@ -128,3 +128,28 @@ fn workflow_secret_names_are_exactly_the_manifest_mappings() {
         assert!(used.contains(name), "unused mapping {name}");
     }
 }
+
+#[test]
+fn install_job_provisions_the_graph_before_installing_the_package() {
+    let workflow: Value = serde_norway::from_str(&read(".github/workflows/ci.yml")).unwrap();
+    let steps = workflow["jobs"]["install"]["steps"].as_sequence().unwrap();
+    let commands: Vec<_> = steps
+        .iter()
+        .filter_map(|step| step["run"].as_str())
+        .collect();
+    let locked = commands
+        .iter()
+        .position(|command| *command == "bun install --frozen-lockfile")
+        .expect("install job needs Nx's locked dependencies");
+    let install = commands
+        .iter()
+        .position(|command| *command == "just install-smoke")
+        .unwrap();
+    assert!(locked < install);
+    assert!(steps.iter().any(|step| {
+        step["uses"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("oven-sh/setup-bun@")
+    }));
+}
