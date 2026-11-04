@@ -189,7 +189,7 @@ printf '%s\n' "$GOBIN" >> "$INSTALL_LOG"
     success(&h.recipe("setup-actionlint", &[]));
     let version = fs::read_to_string(source.join("actionlint.version")).unwrap();
     assert!(h.read("installs").contains(&format!(
-        "github.com/rhysd/actionlint/cmd/actionlint@{}",
+        "github.com/rhysd/actionlint/cmd/actionlint@v{}",
         version.trim()
     )));
     assert!(

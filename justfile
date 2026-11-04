@@ -122,4 +122,4 @@ setup-onevcs:
 
 # Go verifies the pinned installer module against its checksum database.
 setup-actionlint:
-    @GOBIN="$HOME/.local/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@$(cat tools/actionlint.version)"
+    @GOBIN="$HOME/.local/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$(cat tools/actionlint.version)"
