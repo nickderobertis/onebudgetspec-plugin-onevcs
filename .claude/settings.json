@@ -41,7 +41,10 @@
       "Bash(just coverage)",
       "Bash(just deny)",
       "Bash(just lint-llm-validate:*)",
-      "Bash(llmlint doctor)"
+      "Bash(llmlint doctor)",
+      "Bash(just dependencies)",
+      "Bash(just setup-onevcs)",
+      "Bash(just setup-actionlint)"
     ],
     "deny": []
   }
