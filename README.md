@@ -28,7 +28,7 @@ runs that journey locally; it uploads nothing. There is no downloaded-archive
 installer, npm wrapper, or PyPI distribution.
 
 No arguments, `-h` and `--help` show placeholder help; `-V` and `--version`
-show the package version. Exit 0 means success. Unsupported arguments print an
+show the package version. Exit 0 means success; an output I/O failure exits 1. Unsupported arguments print an
 error and suggested action to stderr, exit 2, and perform no work.
 
 ## Development

@@ -25,12 +25,12 @@ bootstrap: fetch
 # (unit, release wiring, the e2e journeys that spawn the built binary) with the 95%
 # line-coverage floor over every crate's run, and the builds. Fails on any issue.
 check tier="affected": (budgets tier)
-    {{ if tier == "all" { "bunx nx run-many" } else if tier == "affected" { "bunx nx affected --base=" + base } else { error("unknown tier '" + tier + "' — use 'affected' (the default) or 'all'") } }} -t format-check lint test build --outputStyle=static
+    {{ if tier == "all" { "bunx nx run-many" } else if tier == "affected" { "bunx nx affected --base=" + base } else { error("unknown tier '" + tier + "' — use 'affected' (the default) or 'all'") } }} -t format-check lint test build --exclude=install --outputStyle=static
     bunx nx run workspace:coverage --excludeTaskDependencies --outputStyle=static
 
 # The tests the affected tier reaches, then the coverage floor over their runs.
 test:
-    bunx nx affected --base={{ base }} -t test --outputStyle=static
+    bunx nx affected --base={{ base }} -t test --exclude=install --outputStyle=static
     bunx nx run workspace:coverage --excludeTaskDependencies --outputStyle=static
 
 # Every Rust test, instrumented, then the coverage floor over the union of their runs.
@@ -48,7 +48,7 @@ fetch:
 # The end-user install path: package the crate as crates.io would serve it, install it
 # locked into an empty root, run the installed binary. Its own CI job, outside `check`.
 install-smoke:
-    bunx nx run install:install --outputStyle=static
+    bunx nx run install:test --outputStyle=static
 
 # Lint and type check the projects this change can reach: clippy -D warnings,
 # actionlint and the project-boundary check.

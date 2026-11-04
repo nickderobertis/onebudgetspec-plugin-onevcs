@@ -74,3 +74,27 @@ fn help_version_and_errors_perform_no_work() {
         assert_eq!(std::fs::read_dir(cwd.path()).unwrap().count(), 1);
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn broken_output_streams_fail_without_panicking() {
+    use std::{
+        os::{fd::OwnedFd, unix::net::UnixStream},
+        process::Stdio,
+    };
+    for args in [["--version"], ["--help"], ["--unknown"]] {
+        let (writer, reader) = UnixStream::pair().unwrap();
+        drop(reader);
+        let mut command = Command::new(binary());
+        command.args(args);
+        let closed = Stdio::from(OwnedFd::from(writer));
+        if args == ["--unknown"] {
+            command.stderr(closed);
+        } else {
+            command.stdout(closed);
+        }
+        let result = command.output().unwrap();
+        assert_eq!(result.status.code(), Some(1), "{result:?}");
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("panicked"));
+    }
+}
