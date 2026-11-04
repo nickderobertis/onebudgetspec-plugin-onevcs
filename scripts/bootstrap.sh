@@ -20,7 +20,7 @@ for tool in cargo bun; do
     exit 1
   }
 done
-run bun install --frozen-lockfile
+run just dependencies
 # With no argument, installs the toolchain rust-toolchain.toml pins.
 if command -v rustup >/dev/null 2>&1; then
   run rustup toolchain install

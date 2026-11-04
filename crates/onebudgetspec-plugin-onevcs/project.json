@@ -37,6 +37,9 @@
       "cache": false,
       "dependsOn": [
         "workspace:coverage-clear"
+      ],
+      "outputs": [
+        "{workspaceRoot}/target/llvm-cov-target"
       ]
     }
   }

@@ -5,26 +5,27 @@ use std::{
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let (output, usage_error) = match args.as_slice() {
-        [arg] if arg == "--version" || arg == "-V" => (
-            format!("onebudgetspec-plugin-onevcs {}", env!("CARGO_PKG_VERSION")),
-            false,
-        ),
-        [] => (help().to_owned(), false),
-        [arg] if arg == "--help" || arg == "-h" => (help().to_owned(), false),
-        _ => (
-            "error: unsupported arguments; scaffold performs no work. Try --help.".to_owned(),
-            true,
-        ),
+    let response = match args.as_slice() {
+        [arg] if arg == "--version" || arg == "-V" => Response::Information(format!(
+            "onebudgetspec-plugin-onevcs {}",
+            env!("CARGO_PKG_VERSION")
+        )),
+        [] => Response::Information(help().to_owned()),
+        [arg] if arg == "--help" || arg == "-h" => Response::Information(help().to_owned()),
+        _ => Response::UsageError,
     };
-    let result = if usage_error {
-        writeln!(io::stderr().lock(), "{output}")
-    } else {
-        writeln!(io::stdout().lock(), "{output}")
+    let result = match response {
+        Response::Information(output) => {
+            writeln!(io::stdout().lock(), "{output}").map(|()| ExitCode::SUCCESS)
+        }
+        Response::UsageError => writeln!(
+            io::stderr().lock(),
+            "error: unsupported arguments; scaffold performs no work. Try --help."
+        )
+        .map(|()| ExitCode::from(2)),
     };
     match result {
-        Ok(()) if usage_error => ExitCode::from(2),
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(status) => status,
         Err(error) => {
             // Reporting is best-effort when the diagnostic stream itself is broken.
             let _ = writeln!(
@@ -34,6 +35,11 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+enum Response {
+    Information(String),
+    UsageError,
 }
 
 fn help() -> &'static str {

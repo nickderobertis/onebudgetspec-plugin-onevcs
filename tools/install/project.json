@@ -11,5 +11,8 @@
       },
       "cache": false
     }
-  }
+  },
+  "implicitDependencies": [
+    "onebudgetspec-plugin-onevcs"
+  ]
 }

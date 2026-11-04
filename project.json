@@ -22,7 +22,8 @@
           "target": "test",
           "projects": [
             "onebudgetspec-plugin-onevcs",
-            "onebudgetspec-plugin-onevcs-e2e"
+            "onebudgetspec-plugin-onevcs-e2e",
+            "repo-checks"
           ]
         }
       ]
