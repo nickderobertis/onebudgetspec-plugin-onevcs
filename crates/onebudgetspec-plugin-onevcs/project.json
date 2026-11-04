@@ -1,0 +1,43 @@
+{
+  "name": "onebudgetspec-plugin-onevcs",
+  "tags": [
+    "lang:rust",
+    "type:app"
+  ],
+  "targets": {
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p onebudgetspec-plugin-onevcs"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p onebudgetspec-plugin-onevcs -- --check"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo clippy -p onebudgetspec-plugin-onevcs --all-targets --locked -- -D warnings"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo build -p onebudgetspec-plugin-onevcs --locked"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bash tools/coverage.sh onebudgetspec-plugin-onevcs"
+      },
+      "cache": false,
+      "dependsOn": [
+        "workspace:coverage-clear"
+      ]
+    }
+  }
+}

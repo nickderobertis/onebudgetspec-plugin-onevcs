@@ -1,0 +1,9 @@
+schema_version = 2
+probe = "scripts/release-probe.sh"
+
+[[target]]
+id = "crate:onebudgetspec-plugin-onevcs"
+name = "crate"
+what = "The scaffold library and binary, installable with cargo."
+published_by = ".github/workflows/release-plz.yml release job via release-plz.toml."
+manifest = "crates/onebudgetspec-plugin-onevcs/Cargo.toml"

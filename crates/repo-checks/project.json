@@ -1,0 +1,40 @@
+{
+  "name": "repo-checks",
+  "tags": [
+    "lang:rust",
+    "type:tooling"
+  ],
+  "targets": {
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p repo-checks"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p repo-checks -- --check"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo clippy -p repo-checks --all-targets --locked -- -D warnings"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo build -p repo-checks --locked"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo test -p repo-checks --locked"
+      },
+      "cache": false
+    }
+  }
+}

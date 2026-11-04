@@ -1,0 +1,44 @@
+{
+  "name": "workspace",
+  "tags": [
+    "type:tooling"
+  ],
+  "targets": {
+    "coverage-clear": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo llvm-cov clean --workspace"
+      },
+      "cache": false
+    },
+    "coverage": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo llvm-cov report --summary-only --fail-under-lines 95"
+      },
+      "cache": false,
+      "dependsOn": [
+        {
+          "target": "test",
+          "projects": [
+            "onebudgetspec-plugin-onevcs",
+            "onebudgetspec-plugin-onevcs-e2e"
+          ]
+        }
+      ]
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "actionlint && node tools/check-boundaries.mjs"
+      }
+    },
+    "deny": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo deny check && cargo machete"
+      },
+      "cache": false
+    }
+  }
+}

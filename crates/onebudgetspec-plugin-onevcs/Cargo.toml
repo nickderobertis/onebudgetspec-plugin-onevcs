@@ -1,0 +1,9 @@
+[package]
+name = "onebudgetspec-plugin-onevcs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Scaffold for a general onebudgetspec-to-onevcs tool"
+readme = "../../README.md"
+include = ["src/**", "Cargo.toml", "CHANGELOG.md", "../../README.md", "../../LICENSE"]

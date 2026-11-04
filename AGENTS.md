@@ -1,0 +1,81 @@
+# AGENTS.md
+
+`CLAUDE.md` is a symlink; edit this file only. Keep instructions terse and durable,
+put deterministic steps in recipes, and localize subtree rules.
+
+## What this repo is
+
+A general onebudgetspec-to-onevcs tool, independent of GitHub Actions and PR
+comments. This is a scaffold: help/version only, with no public operational
+library API. The main plan owns the future plugin protocol and action runtime,
+inputs and outputs. Do not infer those contracts from this scaffold.
+
+## Two standing goals on every task
+
+Prioritize the user's task while improving context (realistic tests and concise
+instructions) and maintainability (repeatable setup and strict gates). Propose
+material improvements outside the task as follow-ups.
+
+## Stack and composition
+
+- **Product shape:** cli, supplemented with library guidance.
+- **Language(s):** rust
+- **References composed:** base.md, project-graph.md, shapes/cli.md,
+  languages/rust.md, intersections/rust-cli.md, ci.md, llmlint.md, releasing.md,
+  tools/onebudgetspec.md; supplemented with shapes/library.md from dero-skills
+  create-repo v1.52.0. Composed with `--shape cli --language rust --releasing`.
+- **Projects in the graph:** published crate, binary e2e leaf, repository checks,
+  packaged install journey, and workspace tooling. The e2e depends only on the
+  binary build; repository contracts have their own tests.
+- **Excluded, and why:** asdf/direnv (native toolchain files suffice); downloaded
+  archives/installers and npm/PyPI wrappers (cargo is the sole installation
+  surface); action.yml (future action belongs in its own repository); live tests
+  (no operational behavior); measured budget thresholds (no measurements yet).
+  Registry publication is release-plz's native idempotent crates.io flow rather
+  than a separate tag-triggered archive build. Plugin distribution beyond this
+  initial crate awaits the main plan's interface decision.
+- Nx is mandatory even for this single deliverable; a graph boundary check keeps
+  e2e a leaf. No JS module-boundary plugin is needed for Rust-only sources.
+- Linux/macOS run the POSIX development gate; the packaged tool installation is
+  also proven on Windows. No MSRV promise yet: use the pinned stable toolchain.
+
+## Command surface
+
+Use `just --list`. Bootstrap is clean-clone setup; check runs affected Nx targets
+against an explicit base, including tests/e2e and aggregate 95% line coverage.
+The full sweep runs at release-prep on release PRs; ordinary PRs and main pushes
+use the affected tier. No later release operation re-gates that tree.
+Judged lint stays separate from the deterministic gate. Keep the narrow command
+allowlist current when adding routine commands.
+
+## Commits, releases, and merging
+
+Squash-only merging, ordinary-change auto-merge allowed, head branches deleted,
+all gating checks required; admins may override in an emergency. PR titles follow
+Conventional Commits and the PR template supplies the squash body.
+
+Use semantic versioning: pre-1.0 feat/breaking changes bump minor,
+fix/perf/refactor/build bump patch; docs/chore/ci/test/style do not release.
+After 1.0 breaking changes bump major. Release-plz computes versions/changelogs
+from conventional history. **The release PR is a human checkpoint**: do not arm
+its auto-merge. Only merging that PR authorizes the automated crate publish/tag/
+release chain. Nobody hand-edits versions, tags or deploys.
+
+## Invariants and tests
+
+Validate inputs at trust boundaries, keep permissions narrow, and never store
+credentials. Tests drive real boundaries, happy and failure paths; only external
+registries are doubled. The binary journey verifies help, metadata version,
+invalid arguments, and unchanged working files; the install journey repeats it
+outside the checkout. Repository tests drive the declared probe and onevcs.
+Coverage is a floor, not a replacement for realistic journeys.
+
+A cost figure belongs in onebudgetspec, not a test threshold; wall-clock tests
+wait on events. Time-feature contracts, exact counts and absent operations stay
+assertions. Add budgets from measurements, not invented limits.
+
+Scripts should be quiet on success and give the exact failure and next action.
+Fix findings at their site; any narrowly justified suppression must explain why.
+Provider credentials are needed for the separate CI llmlint check. Release PR
+creation awaits the PAT; publication awaits PAT and crates credentials. See
+[README](README.md) for the user-run secret setup; never sync secrets implicitly.

@@ -1,0 +1,47 @@
+{
+  "name": "onebudgetspec-plugin-onevcs-e2e",
+  "tags": [
+    "lang:rust",
+    "type:e2e"
+  ],
+  "targets": {
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p onebudgetspec-plugin-onevcs-e2e"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt -p onebudgetspec-plugin-onevcs-e2e -- --check"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo clippy -p onebudgetspec-plugin-onevcs-e2e --all-targets --locked -- -D warnings"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo build -p onebudgetspec-plugin-onevcs-e2e --locked"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bash tools/coverage.sh onebudgetspec-plugin-onevcs-e2e"
+      },
+      "cache": false,
+      "dependsOn": [
+        "workspace:coverage-clear",
+        "onebudgetspec-plugin-onevcs:build"
+      ]
+    }
+  },
+  "implicitDependencies": [
+    "onebudgetspec-plugin-onevcs"
+  ]
+}

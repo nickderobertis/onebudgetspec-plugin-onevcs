@@ -1,0 +1,31 @@
+[workspace]
+release_always = true
+release_commits = "^(feat|fix|perf|refactor|build)(\\([^)]+\\))?!?:"
+git_tag_name = "v{{ version }}"
+git_release_name = "v{{ version }}"
+semver_check = false
+
+[[package]]
+name = "onebudgetspec-plugin-onevcs"
+publish = true
+changelog_path = "crates/onebudgetspec-plugin-onevcs/CHANGELOG.md"
+
+[[package]]
+name = "onebudgetspec-plugin-onevcs-e2e"
+release = false
+publish = false
+
+[[package]]
+name = "repo-checks"
+release = false
+publish = false
+
+[changelog]
+commit_parsers = [
+ { message = "^feat", group = "Added" },
+ { message = "^fix", group = "Fixed" },
+ { message = "^perf", group = "Performance" },
+ { message = "^refactor", group = "Changed" },
+ { message = "^build", group = "Build" },
+ { message = ".*", skip = true },
+]
