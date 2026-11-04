@@ -23,10 +23,39 @@ impl Host {
         for name in ["session-setup.sh", "setup-llmlint.sh"] {
             fs::copy(source.join(name), repo.join("scripts").join(name)).unwrap();
         }
-        for tool in ["bash", "dirname", "mkdir", "chmod"] {
+        for tool in ["bash", "dirname", "mkdir", "chmod", "cat"] {
             std::os::unix::fs::symlink(format!("/bin/{tool}"), bin.join(tool)).unwrap();
         }
         Self { temp, repo, bin }
+    }
+    fn recipe(&self, recipe: &str, vars: &[(&str, &str)]) -> Output {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        fs::copy(source.join("justfile"), self.repo.join("justfile")).unwrap();
+        fs::create_dir_all(self.repo.join("tools")).unwrap();
+        for pin in ["onevcs.version", "actionlint.version"] {
+            fs::copy(
+                source.join("tools").join(pin),
+                self.repo.join("tools").join(pin),
+            )
+            .unwrap();
+        }
+        let just = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|p| p.join("just"))
+            .find(|p| p.is_file())
+            .unwrap();
+        let mut command = Command::new(just);
+        command
+            .args(["--justfile"])
+            .arg(self.repo.join("justfile"))
+            .arg(recipe)
+            .env_clear()
+            .env("HOME", self.temp.path().join("home"))
+            .env("PATH", &self.bin)
+            .env("INSTALL_LOG", self.temp.path().join("installs"));
+        for (key, value) in vars {
+            command.env(key, value);
+        }
+        command.output().unwrap()
     }
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.join(name);
@@ -116,4 +145,58 @@ fn startup_and_judged_install_cover_install_skip_failure_and_session_recovery() 
         h.read("session.env").contains("export PATH="),
         "standalone setup must persist the original PATH delta"
     );
+}
+
+#[test]
+fn pinned_tool_recipes_select_versions_and_propagate_installer_failures() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools");
+    let vcs = fs::read_to_string(source.join("onevcs.version")).unwrap();
+    let h = Host::new();
+    h.installer();
+    success(&h.recipe("setup-onevcs", &[]));
+    assert!(
+        h.read("installs")
+            .contains(&format!("onevcs-cli=={}", vcs.trim()))
+    );
+    let h = Host::new();
+    h.installer();
+    h.program(
+        "onevcs",
+        "#!/bin/bash\nprintf 'onevcs %s\\n' \"$SERVED_VERSION\"\n",
+    );
+    success(&h.recipe("setup-onevcs", &[("SERVED_VERSION", vcs.trim())]));
+    assert!(h.read("installs").is_empty());
+    success(&h.recipe("setup-onevcs", &[("SERVED_VERSION", "0.0.0")]));
+    assert!(
+        h.read("installs")
+            .contains(&format!("onevcs-cli=={}", vcs.trim()))
+    );
+    let failed = h.recipe(
+        "setup-onevcs",
+        &[("SERVED_VERSION", "0.0.0"), ("INSTALL_FAIL", "yes")],
+    );
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("registry unavailable"));
+    let h = Host::new();
+    h.program(
+        "go",
+        r#"#!/bin/bash
+printf '%s\n' "$*" >> "$INSTALL_LOG"
+printf '%s\n' "$GOBIN" >> "$INSTALL_LOG"
+[ "${INSTALL_FAIL:-}" != yes ] || { echo 'module installation failed' >&2; exit 9; }
+"#,
+    );
+    success(&h.recipe("setup-actionlint", &[]));
+    let version = fs::read_to_string(source.join("actionlint.version")).unwrap();
+    assert!(h.read("installs").contains(&format!(
+        "github.com/rhysd/actionlint/cmd/actionlint@{}",
+        version.trim()
+    )));
+    assert!(
+        h.read("installs")
+            .contains(&h.temp.path().join("home/.local/bin").display().to_string())
+    );
+    let failed = h.recipe("setup-actionlint", &[("INSTALL_FAIL", "yes")]);
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("module installation failed"));
 }

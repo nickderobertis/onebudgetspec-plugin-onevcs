@@ -1,6 +1,6 @@
-//! Authenticated publication uploads an irreversible registry artifact and requires
-//! user-managed credentials; this task forbids that cost. Structural wiring assertions
-//! cover publication, while the inexpensive authorization shell steps run below.
+//! Registry publication is irreversible and requires production credentials.
+//! Structural wiring assertions and package dry runs cover publication; the cheap
+//! authorization shell steps are executed below.
 use serde_norway::Value;
 use std::{
     fs,
