@@ -16,7 +16,7 @@ default:
     @just --list
 
 # Set up from a clean clone: the locked crates, Nx's locked Node toolchain, the pinned
-# Rust toolchain, and cargo-llvm-cov and cargo-nextest.
+# Rust toolchain, and cargo-llvm-cov.
 bootstrap: fetch
     @bash scripts/bootstrap.sh
 
@@ -48,10 +48,10 @@ fetch:
 # The end-user install path: package the crate as crates.io would serve it, install it
 # locked into an empty root, run the installed binary. Its own CI job, outside `check`.
 install-smoke:
-    @bash tools/install/smoke.sh
+    bunx nx run install:install --outputStyle=static
 
-# Lint and type check the projects this change can reach: clippy -D warnings, cargo
-# check, shellcheck, actionlint and the project-boundary check.
+# Lint and type check the projects this change can reach: clippy -D warnings,
+# actionlint and the project-boundary check.
 lint:
     bunx nx affected --base={{ base }} -t lint typecheck --outputStyle=static
 

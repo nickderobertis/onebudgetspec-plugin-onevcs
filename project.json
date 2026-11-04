@@ -7,14 +7,14 @@
     "coverage-clear": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cargo llvm-cov clean --workspace"
+        "command": "bash tools/coverage.sh --clear"
       },
       "cache": false
     },
     "coverage": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cargo llvm-cov report --summary-only --fail-under-lines 95"
+        "command": "bash tools/coverage.sh --report"
       },
       "cache": false,
       "dependsOn": [
