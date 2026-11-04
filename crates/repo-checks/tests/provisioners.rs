@@ -6,6 +6,13 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
 };
+fn executable(name: &str) -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|p| p.join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| panic!("{name} must be available on PATH"))
+}
+
 struct Host {
     temp: tempfile::TempDir,
     repo: PathBuf,
@@ -24,7 +31,7 @@ impl Host {
             fs::copy(source.join(name), repo.join("scripts").join(name)).unwrap();
         }
         for tool in ["bash", "dirname", "mkdir", "chmod", "cat"] {
-            std::os::unix::fs::symlink(format!("/bin/{tool}"), bin.join(tool)).unwrap();
+            std::os::unix::fs::symlink(executable(tool), bin.join(tool)).unwrap();
         }
         Self { temp, repo, bin }
     }
@@ -39,10 +46,7 @@ impl Host {
             )
             .unwrap();
         }
-        let just = std::env::split_paths(&std::env::var_os("PATH").unwrap())
-            .map(|p| p.join("just"))
-            .find(|p| p.is_file())
-            .unwrap();
+        let just = executable("just");
         let mut command = Command::new(just);
         command
             .args(["--justfile"])
