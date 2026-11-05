@@ -53,7 +53,9 @@ nearest by ancestry, never by timestamp. The run's artifact `NAME` must hold
 entry is that run's latest attempt at its head and whose every embedded commit is an ancestor
 of the next. A file failing any of that is refused whole and the next run is tried, within five
 REST requests for the whole lookup (three normally); the first valid file is the only one used, and
-files are never merged.
+files are never merged. The limit is checked between onevcs calls, so two gaps remain: one artifact
+listing of several pages can pass it before returning, and a failure on a later page reports no
+cost, counting that listing as one request. A base run's artifacts normally fit one page.
 
 | Exit | `PATH` | Meaning |
 | --- | --- | --- |

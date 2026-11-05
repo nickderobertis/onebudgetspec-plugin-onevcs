@@ -4,6 +4,15 @@
 //! local git must prove every embedded commit reaches the requested base head. A file
 //! that fails any of it is refused whole rather than filtered: losing an entry is
 //! acceptable, and an unrelated entry is not.
+//!
+//! # The request limit and its two known gaps
+//!
+//! A lookup stops before starting another listing or download once its reported cost has
+//! reached five REST requests. The check sits between onevcs calls, because onevcs's artifact
+//! listing follows every page before it returns. So one multi-page listing can pass the limit
+//! before the check sees it, and a failure on a later page reports no cost: the report counts
+//! that listing as one request however many pages it read. A base run's artifacts fit one
+//! page, so neither arises in ordinary use.
 use std::{
     fs,
     io::{Read, Write},
@@ -233,7 +242,8 @@ impl Spent {
         self.cost.requests.extend(cost.requests);
     }
 
-    /// A failed query reports no cost of its own, yet it reached GitHub.
+    /// A failed query reports no cost of its own, yet it reached GitHub: at least this one
+    /// request, and any earlier pages of a listing go uncounted (see the module docs).
     fn add_failed(&mut self, path: String) {
         self.cost.rest_requests += 1;
         self.cost.requests.push(path);

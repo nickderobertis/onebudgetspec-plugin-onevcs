@@ -80,6 +80,8 @@ def serve(root):
             listed = re.fullmatch(r'/repos/owner/repo/actions/runs/(\d+)/artifacts', path)
             if listed and 'list_status' in state:
                 return self.fail(state['list_status'], 'artifact listing failed')
+            if listed and listed[1] in state.get('artifact_pages', {}):
+                return self.artifact_page(state['artifact_pages'][listed[1]])
             if listed:
                 artifacts = state['artifacts'].get(listed[1], [])
                 return self.reply(200, json.dumps({'artifacts': artifacts}).encode())
@@ -90,6 +92,22 @@ def serve(root):
                 self.send_header('Content-Length', '0')
                 return self.end_headers()
             self.fail(404, 'Not Found')
+
+        def artifact_page(self, pages):
+            found = re.search(r'[?&]page=(\d+)', self.path)
+            number = int(found[1]) if found else 1
+            page = pages[number - 1]
+            if isinstance(page, int):
+                return self.fail(page, 'artifact page failed')
+            data = json.dumps({'artifacts': page}).encode()
+            self.send_response(200)
+            if number < len(pages):
+                base = self.path.split('?')[0]
+                self.send_header('Link', '<https://api.github.com%s?per_page=100&page=%d>; rel="next"'
+                                 % (base, number + 1))
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Host)
     (root / 'port.ready').write_text(str(server.server_port) + '\n')
@@ -112,6 +130,7 @@ def gh(args):
             fields[key] = int(value) if arg == '-F' else value
         elif arg != '--include':
             path = arg
+    path = path.removeprefix('https://api.github.com/')
     if path == 'graphql':
         method = 'POST'
         fields = {'query': fields.pop('query'), 'variables': fields}

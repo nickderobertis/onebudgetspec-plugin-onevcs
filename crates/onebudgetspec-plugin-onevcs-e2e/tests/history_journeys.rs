@@ -944,3 +944,105 @@ fn the_fallback_uses_exactly_one_file_the_first_valid_one() {
     );
     assert_eq!(answer.disclosed("lost"), [skipped, oldest]);
 }
+
+fn artifact_page(ids: std::ops::Range<u64>) -> serde_json::Value {
+    let page: Vec<_> = ids
+        .map(|id| json!({"id": id, "name": "unrelated", "size_in_bytes": 1, "expired": false}))
+        .collect();
+    json!(page)
+}
+
+/// The documented limit: the check sits between onevcs calls, so one listing can pass it
+/// before returning. Once it has, the lookup starts nothing further and writes nothing.
+#[test]
+fn a_paginated_listing_can_pass_the_limit_and_then_nothing_further_starts() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let jobs = BaseJobs::new(&host, &repository, 1);
+    let older = repository.commit();
+    let older_run = jobs.run(&older, true);
+    let newest = repository.commit();
+    let newest_run = jobs.run(&newest, true);
+    let good = host.state()["artifacts"][newest_run.to_string()][0].clone();
+    // The wanted artifact sits on the last of six pages.
+    let mut pages: Vec<_> = (0..5u64)
+        .map(|page| artifact_page(8000 + page * 10..8000 + page * 10 + 2))
+        .collect();
+    pages.push(json!([good]));
+    let host_pages = json!({newest_run.to_string(): pages});
+    host.update(|state| state["artifact_pages"] = host_pages);
+
+    let output = host.root.path().join("paginated.json");
+    std::fs::write(&output, "stale").unwrap();
+    host.clear_requests();
+    let answer = host.run_history(repository.path(), &newest, &output);
+
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert_eq!(answer.report["status"], "unavailable");
+    assert!(
+        answer
+            .stderr
+            .contains("limit of 5 REST requests was reached"),
+        "{}",
+        answer.stderr
+    );
+    assert!(!output.exists(), "no history is written");
+    assert!(
+        answer
+            .reason_for("skipped", &newest)
+            .contains("not downloaded")
+    );
+    assert!(answer.reason_for("skipped", &older).contains("not read"));
+
+    // One listing plus six pages: over five, by the single call the check cannot enter.
+    let paths = host.paths();
+    assert_eq!(paths.len(), 7, "{paths:?}");
+    assert!(
+        !paths.iter().any(|path| path.ends_with("/zip")),
+        "{paths:?}"
+    );
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.contains(&format!("/runs/{older_run}/"))),
+        "{paths:?}"
+    );
+    // That listing succeeded, so its cost is whole.
+    assert_eq!(answer.report["cost"]["rest_requests"], 7);
+}
+
+/// The other documented limit: a failed query reports no cost, so a failure on a later page
+/// counts its listing as one request, however many pages it read.
+#[test]
+fn a_later_page_failure_undercounts_only_by_the_documented_pages() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let head = repository.commit();
+    host.add_run(1, &head, 1, 1);
+    let pages = json!({"1": [artifact_page(9000..9002), artifact_page(9010..9012), 500]});
+    host.update(|state| state["artifact_pages"] = pages);
+
+    let output = host.root.path().join("later-page.json");
+    host.clear_requests();
+    let answer = host.run_history(repository.path(), &head, &output);
+
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert_eq!(answer.report["status"], "unavailable");
+    assert!(!output.exists());
+    let reason = answer.reason_for("skipped", &head);
+    assert!(reason.contains("could not list its artifacts"), "{reason}");
+    assert!(reason.contains("500"), "{reason}");
+
+    // The host saw the run listing and three artifact pages; the report holds the run
+    // listing and one request for the failed artifact listing.
+    assert_eq!(host.paths().len(), 4, "{:?}", host.paths());
+    assert_eq!(
+        answer.report["cost"]["rest_requests"], 2,
+        "{}",
+        answer.report
+    );
+    assert_eq!(
+        answer.report["cost"]["requests"].as_array().unwrap().len(),
+        2
+    );
+}
