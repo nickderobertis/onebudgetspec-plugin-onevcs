@@ -826,6 +826,13 @@ fn the_request_bound_also_stops_a_download_and_listing_failures_are_counted() {
     // One listing and four artifact lists spend the bound before the good file's download.
     let answer = answer_after(&host, &repository, failed.last().unwrap());
     assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert!(
+        answer
+            .stderr
+            .contains("limit of 5 REST requests was reached"),
+        "{}",
+        answer.stderr
+    );
     assert_eq!(host.paths().len(), 5, "{:?}", host.paths());
     assert!(
         answer
@@ -892,4 +899,48 @@ fn an_output_that_cannot_be_written_leaves_no_file_and_says_so() {
         "the read's cost is still reported"
     );
     assert!(!path.exists());
+}
+
+/// The fallback skips a run with no usable file and stops at the first valid one: an older
+/// valid file holding a commit the chosen one lacks is neither read nor combined.
+#[test]
+fn the_fallback_uses_exactly_one_file_the_first_valid_one() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let jobs = BaseJobs::new(&host, &repository, 1);
+    let oldest = repository.commit();
+    let oldest_run = jobs.run(&oldest, true);
+    // Started fresh, as after an unavailable baseline, so `oldest` is only in the older file.
+    let chosen = repository.commit();
+    let chosen_run = jobs.finish(&chosen, None, true);
+    let skipped = repository.commit();
+    jobs.run(&skipped, false);
+
+    let answer = answer_after(&host, &repository, &skipped);
+    assert_eq!(answer.code, Some(0), "{}", answer.stderr);
+    assert!(
+        answer
+            .reason_for("skipped", &skipped)
+            .contains("no artifact named")
+    );
+    assert_eq!(answer.report["selected"]["run_id"], chosen_run.to_string());
+    assert_eq!(
+        answer.heads(),
+        vec![chosen.clone()],
+        "only the chosen file's content"
+    );
+    let paths = host.paths();
+    assert_eq!(
+        paths.iter().filter(|p| p.ends_with("/zip")).count(),
+        1,
+        "{paths:?}"
+    );
+    assert_eq!(paths.len(), 4, "{paths:?}");
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.contains(&format!("/runs/{oldest_run}/"))),
+        "the older valid run is never read: {paths:?}"
+    );
+    assert_eq!(answer.disclosed("lost"), [skipped, oldest]);
 }

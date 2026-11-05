@@ -24,8 +24,9 @@ pub const ROLLING_HISTORY_FILE: &str = "rolling-history.json";
 
 /// The one listing page this reads; older runs are never walked.
 const LISTED_RUNS: u32 = 20;
-/// The whole read's REST bound: a listing and two runs' artifact list and download, so a
-/// failed upload can fall back to the run before it without reconstructing anything.
+/// The whole lookup's REST bound: a listing and two runs' artifact list and download, so a
+/// failed upload can fall back to the run before it. The first valid file is the answer and
+/// files are never combined; the normal path is three reads.
 const MAX_REST_REQUESTS: u32 = 5;
 /// Refuses an archive or member far beyond 20 commits of 100 rows before reading it.
 const MAX_SAVED_BYTES: u64 = 64 * 1024 * 1024;
@@ -193,8 +194,15 @@ pub fn read(request: &HistoryRequest) -> HistoryReport {
         }
     }
     let Some((history, selected)) = chosen else {
+        let bound = if spent.cost.rest_requests >= MAX_REST_REQUESTS {
+            format!(
+                "this lookup's limit of {MAX_REST_REQUESTS} REST requests was reached with no valid file; "
+            )
+        } else {
+            String::new()
+        };
         let reason = format!(
-            "no eligible rolling history among {} completed push run(s) of workflow {} on {}; see skipped",
+            "{bound}no eligible rolling history among {} completed push run(s) of workflow {} on {}; see skipped",
             runs.len(),
             request.workflow.get(),
             request.base_ref
