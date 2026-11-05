@@ -19,7 +19,7 @@ fi
 eval "$coverage_env"
 if [ -n "${2:-}" ]; then
   cargo build --locked -p "$2"
-  export SCAFFOLD_BIN="$CARGO_LLVM_COV_TARGET_DIR/debug/$2"
+  export PLUGIN_BIN="$CARGO_LLVM_COV_TARGET_DIR/debug/$2"
 fi
 cargo test --locked -p "$1"
 touch target/coverage-ran
