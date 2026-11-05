@@ -297,17 +297,39 @@ fn reruns_use_the_latest_attempt_once_and_refuse_a_file_from_an_earlier_one() {
             .contains("not in the selected history")
     );
 
+    // A rerun of a commit a newer file already carries: that file holds the older attempt,
+    // so the newer attempt is disclosed rather than silently absent.
+    let carried = repository.commit();
+    let carried_run = jobs.run(&carried, true);
+    let child = repository.commit();
+    jobs.run(&child, true);
+    host.rerun(carried_run, 2);
+    let answer = answer_after(&host, &repository, &child);
+    assert_eq!(
+        answer.report["selected"]["head_sha"],
+        child.as_str(),
+        "{}",
+        answer.report
+    );
+    assert!(
+        answer
+            .reason_for("lost", &carried)
+            .contains("holds attempt 1 of this commit; attempt 2 did not reach it"),
+        "{}",
+        answer.report
+    );
+
     // A later run re-executing a known commit under a new run id: its file wins, once, and
     // the earlier run of that commit is no loss.
     let third = repository.commit();
     let held = jobs.read(&third).unwrap();
-    assert_eq!(held.runs.len(), 1);
+    assert_eq!(held.runs.len(), 3);
     let third_run = jobs.finish(&third, Some(held.clone()), true);
     let again = jobs.finish(&third, Some(held), true);
     assert!(again > third_run);
     let answer = answer_after(&host, &repository, &repository.commit());
     assert_eq!(answer.report["selected"]["run_id"], again.to_string());
-    assert_eq!(answer.heads(), [first, third]);
+    assert_eq!(answer.heads(), [first, carried, child, third]);
     assert!(!answer.disclosed("lost").iter().any(|head| head == &base));
 }
 
@@ -763,4 +785,111 @@ fn listing_failures_git_failures_and_output_failures_are_diagnostic() {
         assert!(String::from_utf8_lossy(&usage.stderr).contains("bare branch name"));
     }
     assert_eq!(host.paths().len(), 0);
+}
+
+#[test]
+fn a_listed_commit_older_than_a_full_history_was_trimmed_not_lost() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let jobs = BaseJobs::new(&host, &repository, 1);
+    let mut heads = Vec::new();
+    for _ in 0..21 {
+        let head = repository.commit();
+        jobs.run(&head, true);
+        heads.push(head);
+    }
+    // The oldest commit's run stays on the listed page, as a rerun's recent creation would keep it.
+    host.update(|state| state["runs"][0]["created_at"] = json!("2026-11-02T00:00:00Z"));
+    let answer = answer_after(&host, &repository, heads.last().unwrap());
+    assert_eq!(answer.heads(), heads[1..]);
+    assert_eq!(
+        answer.disclosed("lost"),
+        Vec::<String>::new(),
+        "{}",
+        answer.report
+    );
+}
+
+#[test]
+fn the_request_bound_also_stops_a_download_and_listing_failures_are_counted() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let jobs = BaseJobs::new(&host, &repository, 1);
+    let good = repository.commit();
+    jobs.run(&good, true);
+    let mut failed = Vec::new();
+    for _ in 0..3 {
+        let head = repository.commit();
+        jobs.run(&head, false);
+        failed.push(head);
+    }
+    // One listing and four artifact lists spend the bound before the good file's download.
+    let answer = answer_after(&host, &repository, failed.last().unwrap());
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert_eq!(host.paths().len(), 5, "{:?}", host.paths());
+    assert!(
+        answer
+            .reason_for("skipped", &good)
+            .contains("not downloaded"),
+        "{}",
+        answer.report
+    );
+
+    // A refused artifact listing still reached the host, and the cost says so.
+    host.update(|state| state["list_status"] = json!(500));
+    let answer = answer_after(&host, &repository, &good);
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert!(
+        answer
+            .reason_for("skipped", &good)
+            .contains("could not list its artifacts"),
+        "{}",
+        answer.report
+    );
+    assert_eq!(host.paths().len(), 2);
+}
+
+#[test]
+fn an_oversized_rolling_member_is_refused_without_reading_it_all() {
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let head = repository.commit();
+    host.add_run(1, &head, 1, 1);
+    let padding = vec![b' '; 65 * 1024 * 1024];
+    host.upload(1, 7000, ARTIFACT, &archive(&[(ROLLING_FILE, &padding)]));
+    let answer = answer_after(&host, &repository, &head);
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert!(
+        answer.reason_for("skipped", &head).contains("byte limit"),
+        "{}",
+        answer.report
+    );
+}
+
+#[test]
+fn an_output_that_cannot_be_written_leaves_no_file_and_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let repository = Repository::new();
+    let host = Host::new(&"0".repeat(40));
+    let jobs = BaseJobs::new(&host, &repository, 1);
+    let head = repository.commit();
+    jobs.run(&head, true);
+    let locked = host.root.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let path = locked.join("rolling.json");
+    let answer = host.run_history(repository.path(), &head, &path);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(answer.code, Some(1), "{}", answer.report);
+    assert!(
+        answer.stderr.contains("choose a writable --output"),
+        "{}",
+        answer.stderr
+    );
+    assert_eq!(answer.report["status"], "unavailable");
+    assert_eq!(
+        answer.report["cost"]["rest_requests"], 3,
+        "the read's cost is still reported"
+    );
+    assert!(!path.exists());
 }

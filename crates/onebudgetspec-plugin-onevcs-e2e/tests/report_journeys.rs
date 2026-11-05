@@ -161,6 +161,27 @@ fn a_current_report_too_large_for_the_host_falls_back_to_a_link_and_still_delive
     let body = host.comment_body(0);
     assert!(body.contains("Complete summary/artifact: https://github.com/owner/repo"));
     assert!(body.chars().count() <= 65_536);
+
+    // Under the host's limit by itself and over it once onevcs adds the key marker: the
+    // reporter must leave room for that marker, or the host write would be refused.
+    let host = Host::new(HEAD_A);
+    let short = publish_request(HEAD_A, "", json!([]));
+    assert_eq!(delivered(&host, &short)["delivered"], true);
+    let overhead_with_marker = host.comment_body(0).len();
+    let host = Host::new(HEAD_A);
+    let over_with_marker = publish_request(
+        HEAD_A,
+        &"y".repeat(65_600 - overhead_with_marker),
+        json!([]),
+    );
+    let result = delivered(&host, &over_with_marker);
+    assert_eq!(result["delivered"], true, "{result}");
+    assert!(host.comment_body(0).chars().count() <= 65_536);
+}
+
+fn delivered(host: &Host, request: &Value) -> Value {
+    let output = host.publish_raw(&request.to_string());
+    serde_json::from_slice(&output.stdout).unwrap()
 }
 
 #[test]

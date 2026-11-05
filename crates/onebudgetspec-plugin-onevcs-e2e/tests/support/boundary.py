@@ -78,6 +78,8 @@ def serve(root):
             if '/workflows/' in path:
                 return self.reply(200, json.dumps({'workflow_runs': state['runs']}).encode())
             listed = re.fullmatch(r'/repos/owner/repo/actions/runs/(\d+)/artifacts', path)
+            if listed and 'list_status' in state:
+                return self.fail(state['list_status'], 'artifact listing failed')
             if listed:
                 artifacts = state['artifacts'].get(listed[1], [])
                 return self.reply(200, json.dumps({'artifacts': artifacts}).encode())
