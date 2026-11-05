@@ -4,6 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Scaffold for a general onebudgetspec-to-onevcs tool"
+description = "Deliver onebudgetspec reports and read saved base-branch budget history through onevcs"
 readme = "../../README.md"
 include = ["src/**", "Cargo.toml", "CHANGELOG.md", "../../README.md", "../../LICENSE"]
+
+[[bin]]
+name = "onebudgetspec-plugin-onevcs"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+onebudgetspec-core.workspace = true
+onevcs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+zip.workspace = true

@@ -1,4 +1,6 @@
+# release-plz versions, tags and cuts the GitHub Release; .github/workflows/release.yml publishes.
 [workspace]
+publish = false
 release_always = true
 features_always_increment_minor = true
 release_commits = "^(feat|fix|perf|refactor|build)(\\([^)]+\\))?!?:"
@@ -8,18 +10,15 @@ semver_check = false
 
 [[package]]
 name = "onebudgetspec-plugin-onevcs"
-publish = true
 changelog_path = "crates/onebudgetspec-plugin-onevcs/CHANGELOG.md"
 
 [[package]]
 name = "onebudgetspec-plugin-onevcs-e2e"
 release = false
-publish = false
 
 [[package]]
 name = "repo-checks"
 release = false
-publish = false
 
 [changelog]
 commit_parsers = [

@@ -4,6 +4,6 @@ probe = "scripts/release-probe.sh"
 [[target]]
 id = "crate:onebudgetspec-plugin-onevcs"
 name = "crate"
-what = "The scaffold library and binary, installable with cargo."
-published_by = ".github/workflows/release-plz.yml release job via release-plz.toml."
+what = "The library and the onebudgetspec-plugin-onevcs executable, installable with cargo."
+published_by = ".github/workflows/release.yml publish job via scripts/publish-crate.sh."
 manifest = "crates/onebudgetspec-plugin-onevcs/Cargo.toml"
