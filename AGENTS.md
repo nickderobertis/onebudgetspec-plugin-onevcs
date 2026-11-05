@@ -5,10 +5,10 @@ put deterministic steps in recipes, and localize subtree rules.
 
 ## What this repo is
 
-A general onebudgetspec-to-onevcs tool, independent of GitHub Actions and PR
-comments. This is a scaffold: help/version only, with no public operational
-library API. The main plan owns the future plugin protocol and action runtime,
-inputs and outputs. Do not infer those contracts from this scaffold.
+A general onebudgetspec-to-onevcs tool, independent of GitHub Actions and PR comments: the
+reporter protocol over stdin/stdout, and the `history` verb that reads one saved rolling
+history. onebudgetspec-core owns the wire contracts and budget semantics; onevcs owns host
+access; local git proves ancestry. The action repository consumes the published crate.
 
 ## Two standing goals on every task
 
@@ -31,11 +31,8 @@ material improvements outside the task as follow-ups.
   binary build; repository contracts have their own tests.
 - **Excluded, and why:** asdf/direnv (native toolchain files suffice); downloaded
   archives/installers and npm/PyPI wrappers (cargo is the sole installation
-  surface); action.yml (future action belongs in its own repository); live tests
-  (no operational behavior); measured budget thresholds (no measurements yet).
-  Registry publication is release-plz's native idempotent crates.io flow rather
-  than a separate tag-triggered archive build. Plugin distribution beyond this
-  initial crate awaits the main plan's interface decision.
+  surface); action.yml (the action has its own repository); live tests (only GitHub's HTTP
+  boundary is doubled); measured budget thresholds (no measurements yet).
 - Nx is mandatory even for this single deliverable; a graph boundary check keeps
   e2e a leaf. No JS module-boundary plugin is needed for Rust-only sources.
 - Linux/macOS run the POSIX development gate; the packaged tool installation is
@@ -57,10 +54,10 @@ Conventional Commits and the PR template supplies the squash body.
 
 Use semantic versioning: pre-1.0 feat/breaking changes bump minor,
 fix/perf/refactor/build bump patch; docs/chore/ci/test/style do not release.
-After 1.0 breaking changes bump major. Release-plz computes versions/changelogs
-from conventional history. **The release PR is a human checkpoint**: do not arm
-its auto-merge. Only merging that PR authorizes the automated crate publish/tag/
-release chain. Nobody hand-edits versions, tags or deploys.
+After 1.0 breaking changes bump major. Release-plz computes versions/changelogs from conventional history and arms auto-merge on
+its release PR, under the release PAT. Merging that PR tags and cuts the GitHub Release;
+`release.yml` then publishes the crate idempotently, re-gating nothing. Nobody hand-edits
+versions, tags or deploys.
 
 ## Invariants and tests
 

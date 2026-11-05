@@ -26,15 +26,17 @@ fn release_declaration_and_workflow_agree() {
     let manifest = toml(target["manifest"].as_str().unwrap());
     let name = manifest["package"]["name"].as_str().unwrap();
     assert_eq!(target["id"].as_str().unwrap(), format!("crate:{name}"));
+    assert!(
+        target["published_by"]
+            .as_str()
+            .unwrap()
+            .contains(".github/workflows/release.yml")
+    );
     let config = toml("release-plz.toml");
-    let publish: Vec<_> = config["package"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|p| p["publish"].as_bool() == Some(true))
-        .collect();
-    assert_eq!(publish.len(), 1);
-    assert_eq!(publish[0]["name"].as_str().unwrap(), name);
+    assert_eq!(config["workspace"]["publish"].as_bool(), Some(false));
+    let packages = config["package"].as_array().unwrap();
+    assert!(packages.iter().any(|p| p["name"].as_str() == Some(name)));
+    assert!(packages.iter().all(|p| p.get("publish").is_none()));
     let workflow: Value =
         serde_norway::from_str(&read(".github/workflows/release-plz.yml")).unwrap();
     assert_eq!(
@@ -67,25 +69,249 @@ fn release_declaration_and_workflow_agree() {
         );
         if job == "release" {
             assert_eq!(
-                step["env"]["CARGO_REGISTRY_TOKEN"].as_str(),
-                Some("${{ secrets.CARGO_REGISTRY_TOKEN }}")
-            );
-            assert_eq!(
                 step["if"].as_str(),
                 Some("steps.release-pr.outputs.merged == 'true'")
             );
         }
     }
     let text = read(".github/workflows/release-plz.yml");
-    assert!(!text.contains("gh pr merge"));
-    assert!(!text.contains("workflow_dispatch"));
     assert!(
-        read("AGENTS.md")
-            .to_lowercase()
-            .contains("the release pr is a human checkpoint")
+        !text.contains("CARGO_REGISTRY_TOKEN"),
+        "release-plz only versions"
     );
+    assert!(!text.contains("cargo publish"), "release-plz only versions");
+    assert!(!text.contains("workflow_dispatch"));
+    for instructions in ["AGENTS.md", "README.md"] {
+        assert!(
+            !read(instructions)
+                .to_lowercase()
+                .contains("human checkpoint"),
+            "{instructions} still opts out of release-PR auto-merge"
+        );
+    }
     assert!(!root().join("action.yml").exists());
 }
+
+/// Publishing is its own workflow, fired by the release release-plz cuts, and re-gates nothing.
+#[test]
+fn registry_publishing_is_a_separate_release_workflow() {
+    let workflow: Value = serde_norway::from_str(&read(".github/workflows/release.yml")).unwrap();
+    assert_eq!(
+        workflow["on"]["release"]["types"].as_sequence().unwrap(),
+        &[Value::String("published".into())]
+    );
+    assert!(workflow["on"]["push"].is_null());
+    assert!(workflow["on"]["workflow_dispatch"].is_null());
+    let jobs = workflow["jobs"].as_mapping().unwrap();
+    assert_eq!(jobs.len(), 1);
+    let steps = workflow["jobs"]["publish"]["steps"].as_sequence().unwrap();
+    let checkout = steps
+        .iter()
+        .find(|s| {
+            s["uses"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("actions/checkout@")
+        })
+        .unwrap();
+    assert_eq!(
+        checkout["with"]["ref"].as_str(),
+        Some("${{ github.event.release.tag_name }}")
+    );
+    let publish = steps
+        .iter()
+        .find(|s| s["name"].as_str() == Some("Publish the crate"))
+        .unwrap();
+    assert_eq!(
+        publish["run"].as_str(),
+        Some(r#"bash scripts/publish-crate.sh "$TAG""#)
+    );
+    assert_eq!(
+        publish["env"]["CARGO_REGISTRY_TOKEN"].as_str(),
+        Some("${{ secrets.CARGO_REGISTRY_TOKEN }}")
+    );
+    assert_eq!(
+        publish["env"]["TAG"].as_str(),
+        Some("${{ github.event.release.tag_name }}")
+    );
+    let text = read(".github/workflows/release.yml");
+    for gate in ["just check", "cargo test", "nx ", "release-plz release"] {
+        assert!(!text.contains(gate), "release.yml must not run {gate}");
+    }
+}
+
+#[cfg(unix)]
+fn stub(directory: &Path, name: &str, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = directory.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The publishing script itself, against doubled `cargo` and crates.io: only the upload and
+/// the registry read are doubled, so this proves the decision without publishing anything.
+#[cfg(unix)]
+#[test]
+fn publishing_decides_from_the_tag_and_the_registry_and_is_idempotent() {
+    let manifest = read("Cargo.toml");
+    let version = manifest
+        .split_once("version = \"")
+        .unwrap()
+        .1
+        .split('"')
+        .next()
+        .unwrap();
+    let tag = format!("v{version}");
+    let newer = "999.0.0";
+    let live = |stable: &str| {
+        format!(
+            r#"{{"crate":{{"id":"onebudgetspec-plugin-onevcs","max_stable_version":{stable}}}}}"#
+        )
+    };
+    let cases = [
+        // (tag, registry body, HTTP status, exit, whether the upload ran)
+        (tag.as_str(), "{}".to_owned(), "404", Some(0), true),
+        (tag.as_str(), live(r#""0.0.1""#), "200", Some(0), true),
+        (
+            tag.as_str(),
+            live(&format!(r#""{version}""#)),
+            "200",
+            Some(0),
+            false,
+        ),
+        (
+            tag.as_str(),
+            live(&format!(r#""{newer}""#)),
+            "200",
+            Some(0),
+            false,
+        ),
+        (tag.as_str(), "{}".to_owned(), "503", Some(1), false),
+        ("v999.9.9", "{}".to_owned(), "404", Some(1), false),
+        ("not-a-tag", "{}".to_owned(), "404", Some(2), false),
+    ];
+    for (given, body, status, exit, uploaded) in cases {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("cargo.log");
+        stub(
+            temp.path(),
+            "cargo",
+            &format!(
+                r#"case "$1" in
+  pkgid) echo "path+file:///repo/crates/onebudgetspec-plugin-onevcs#{version}" ;;
+  *) echo "$@" >> '{}' ;;
+esac"#,
+                log.display()
+            ),
+        );
+        let response = temp.path().join("response");
+        std::fs::write(&response, format!("{body}\n{status}")).unwrap();
+        stub(
+            temp.path(),
+            "curl",
+            &format!("cat '{}'", response.display()),
+        );
+        let output = std::process::Command::new("bash")
+            .arg(root().join("scripts/publish-crate.sh"))
+            .arg(given)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    temp.path().display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), exit, "{given} {status}: {output:?}");
+        assert_eq!(log.exists(), uploaded, "{given} {status}: {output:?}");
+        if uploaded {
+            assert_eq!(
+                fs::read_to_string(&log).unwrap().trim(),
+                "publish --locked -p onebudgetspec-plugin-onevcs"
+            );
+        } else if exit != Some(0) {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("publish-crate:"),
+                "{output:?}"
+            );
+        }
+    }
+}
+
+/// The step that arms auto-merge, run as the workflow runs it against a doubled `gh`.
+#[cfg(unix)]
+#[test]
+fn the_release_pull_request_has_auto_merge_armed_and_never_forced() {
+    let workflow: Value =
+        serde_norway::from_str(&read(".github/workflows/release-plz.yml")).unwrap();
+    let steps = workflow["jobs"]["release-pr"]["steps"]
+        .as_sequence()
+        .unwrap();
+    let opened = steps
+        .iter()
+        .position(|s| {
+            s["run"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("release-plz release-pr ")
+        })
+        .unwrap();
+    let arm = &steps[opened + 1];
+    assert_eq!(
+        arm["env"]["GH_TOKEN"].as_str(),
+        Some("${{ secrets.RELEASE_PLZ_TOKEN }}"),
+        "the default token's merge would fire no workflow"
+    );
+    let script = arm["run"].as_str().unwrap();
+    assert!(!script.contains("--admin"));
+    for (listed, merge_exit, merged) in [("7", 0, true), ("", 0, false), ("7", 1, true)] {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("gh.log");
+        stub(
+            temp.path(),
+            "gh",
+            &format!(
+                r#"if [ "$1 $2" = "pr list" ]; then
+  case "$*" in *release-plz-*) echo '{listed}' ;; esac
+else
+  echo "$@" >> '{}'
+  exit {merge_exit}
+fi"#,
+                log.display()
+            ),
+        );
+        let output = std::process::Command::new("bash")
+            .args(["-euo", "pipefail", "-c", script])
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    temp.path().display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .env("GITHUB_REPOSITORY", "fixture/repository")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "a failure to arm only warns: {output:?}"
+        );
+        assert_eq!(log.exists(), merged, "{output:?}");
+        if merged {
+            assert_eq!(
+                fs::read_to_string(&log).unwrap().trim(),
+                "pr merge 7 --repo fixture/repository --auto --squash --delete-branch"
+            );
+        }
+        if merge_exit != 0 {
+            assert!(String::from_utf8_lossy(&output.stdout).contains("::warning::"));
+        }
+    }
+}
+
 #[test]
 fn workflow_secret_names_are_exactly_the_manifest_mappings() {
     let manifest: serde_json::Value = serde_json::from_str(&read("gh-secrets.json")).unwrap();
@@ -226,10 +452,6 @@ fn actual_release_authorization_handles_ordinary_release_and_missing_credentials
             .args(["-euo", "pipefail", "-c", guard])
             .env(
                 "RELEASE_PLZ_TOKEN",
-                if present { "test-credential" } else { "" },
-            )
-            .env(
-                "CARGO_REGISTRY_TOKEN",
                 if present { "test-credential" } else { "" },
             )
             .output()
