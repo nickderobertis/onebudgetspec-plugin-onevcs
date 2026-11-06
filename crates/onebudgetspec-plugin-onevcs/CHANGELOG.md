@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/nickderobertis/onebudgetspec-plugin-onevcs/compare/v0.1.0...v0.1.1) - 2026-11-06
+
+### Fixed
+
+- *(deps)* adopt the onevcs that finds an Actions bot's standing comment ([#7](https://github.com/nickderobertis/onebudgetspec-plugin-onevcs/pull/7))
+
 ## [0.1.0](https://github.com/nickderobertis/onebudgetspec-plugin-onevcs/releases/tag/v0.1.0) - 2026-11-05
 
 ### Added
