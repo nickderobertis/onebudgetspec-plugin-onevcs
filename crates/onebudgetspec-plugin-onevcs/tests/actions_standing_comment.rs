@@ -194,8 +194,7 @@ mod recording {
 
     const CHANGE: &str = "https://github.com/owner/repo/pull/1";
 
-    /// A `gh` on PATH answering each read with one comment per author type, logging its calls.
-    fn stub_gh(directory: &Path, author_types: &[&str]) {
+    fn page(author_types: &[&str], next_cursor: Option<&str>) -> Value {
         let nodes: Vec<Value> = author_types
             .iter()
             .map(|author_type| {
@@ -204,22 +203,41 @@ mod recording {
                        "author": {"__typename": author_type, "login": "a"}})
             })
             .collect();
-        let answer = json!({"data": {"viewer": {"login": "someone"}, "repository": {"pullRequest": {
+        json!({"data": {"viewer": {"login": "someone"}, "repository": {"pullRequest": {
             "headRefOid": "f".repeat(40),
             "comments": {
                 "nodes": nodes,
-                "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}});
+                "pageInfo": {"hasNextPage": next_cursor.is_some(), "endCursor": next_cursor}}}}}})
+    }
+
+    /// A `gh` on PATH answering one first comment page and, for a cursor, a second.
+    fn stub_gh_pages(directory: &Path, first: &Value, second: &Value) {
         let rest = json!({"id": 7, "node_id": "IC_1", "body": "secret body", "extra": "dropped",
                           "user": {"login": "a[bot]", "type": "Bot", "extra": "dropped"}});
-        std::fs::write(directory.join("graphql.json"), answer.to_string()).unwrap();
+        std::fs::write(directory.join("first.json"), first.to_string()).unwrap();
+        std::fs::write(directory.join("second.json"), second.to_string()).unwrap();
         std::fs::write(directory.join("rest.json"), rest.to_string()).unwrap();
-        let script = format!(
-            "#!/bin/sh\necho \"$*\" >> {0}/calls\nif [ \"$2\" = graphql ]; then cat {0}/graphql.json; \
-             else cat {0}/rest.json; fi\n",
-            directory.display()
+        write_gh(
+            directory,
+            &format!(
+                "echo \"$*\" >> {0}/calls\n\
+                 case \"$*\" in\n\
+                 *after=*) cat {0}/second.json ;;\n\
+                 *graphql*) cat {0}/first.json ;;\n\
+                 *) cat {0}/rest.json ;;\n\
+                 esac\n",
+                directory.display()
+            ),
         );
+    }
+
+    fn stub_gh(directory: &Path, author_types: &[&str]) {
+        stub_gh_pages(directory, &page(author_types, None), &page(&[], None));
+    }
+
+    fn write_gh(directory: &Path, body: &str) {
         let gh = directory.join("gh");
-        std::fs::write(&gh, script).unwrap();
+        std::fs::write(&gh, format!("#!/bin/sh\n{body}")).unwrap();
         Command::new("chmod").arg("+x").arg(&gh).status().unwrap();
     }
 
@@ -288,21 +306,102 @@ mod recording {
     }
 
     #[test]
+    fn finds_an_author_on_a_later_page_and_records_a_single_page() {
+        let directory = tempfile::tempdir().unwrap();
+        stub_gh_pages(
+            directory.path(),
+            &page(&["Bot"], Some("cursor")),
+            &page(&["User"], None),
+        );
+        let output = directory.path().join("wire.json");
+
+        let recorded = record(directory.path(), &output);
+
+        assert!(recorded.status.success(), "{recorded:?}");
+        let wire: Value = serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+        assert_eq!(wire["person_comment"]["author"]["__typename"], "User");
+        assert_eq!(
+            wire["page_info"],
+            json!({"hasNextPage": false, "endCursor": null})
+        );
+    }
+
+    #[test]
+    fn a_failing_gh_keeps_the_existing_fixture_and_names_the_change() {
+        let directory = tempfile::tempdir().unwrap();
+        write_gh(
+            directory.path(),
+            "echo 'HTTP 401: Bad credentials' >&2\nexit 1\n",
+        );
+        let output = directory.path().join("wire.json");
+        std::fs::write(&output, "kept").unwrap();
+
+        let refused = record(directory.path(), &output);
+
+        assert!(!refused.status.success(), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            stderr.contains(&format!("could not read {CHANGE}")),
+            "{stderr}"
+        );
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "kept");
+    }
+
+    #[test]
+    fn refuses_a_change_that_is_not_a_github_pull_request() {
+        let directory = tempfile::tempdir().unwrap();
+        stub_gh(directory.path(), &["Bot", "User"]);
+        let refused = recorder(directory.path())
+            .args([
+                "--plugin",
+                env!("CARGO_BIN_EXE_onebudgetspec-plugin-onevcs"),
+            ])
+            .args(["--output", "unused.json"])
+            .args(["--actions-change", "https://example.com/owner/repo/pull/1"])
+            .args(["--person-change", CHANGE])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(!refused.status.success(), "{refused:?}");
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("expected https://github.com"));
+        assert!(!directory.path().join("calls").exists());
+    }
+
+    #[test]
     fn refuses_anything_but_a_graphql_read_while_standing_in_for_gh() {
         let directory = tempfile::tempdir().unwrap();
         stub_gh(directory.path(), &["Bot"]);
-        let refused = recorder(directory.path())
-            .env("RECORD_GITHUB_WIRE_READS", directory.path().join("reads"))
-            .args([
+        let writes: [&[&str]; 3] = [
+            &[
                 "api",
                 "--method",
                 "PATCH",
                 "repos/owner/repo/issues/comments/7",
-            ])
-            .output()
-            .unwrap();
-        assert!(!refused.status.success(), "{refused:?}");
-        assert!(String::from_utf8_lossy(&refused.stderr).contains("read-only"));
+            ],
+            &[
+                "api",
+                "graphql",
+                "-f",
+                "query=mutation { addComment { clientMutationId } }",
+            ],
+            &[
+                "api",
+                "graphql",
+                "--method",
+                "DELETE",
+                "-f",
+                "query=query { viewer { login } }",
+            ],
+        ];
+        for write in writes {
+            let refused = recorder(directory.path())
+                .env("RECORD_GITHUB_WIRE_READS", directory.path().join("reads"))
+                .args(write)
+                .output()
+                .unwrap();
+            assert!(!refused.status.success(), "{write:?}: {refused:?}");
+            assert!(String::from_utf8_lossy(&refused.stderr).contains("read-only"));
+        }
         assert!(!directory.path().join("calls").exists());
     }
 }
