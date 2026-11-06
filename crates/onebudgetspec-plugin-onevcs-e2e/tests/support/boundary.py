@@ -53,7 +53,7 @@ def serve(root):
                 return self.fail(state['read_status'], 'read refused')
             variables = payload['variables']
             nodes = [dict(id=c['node_id'], databaseId=c['id'], url=c['html_url'], body=c['body'],
-                          author={'login': c['author']}) for c in state['comments']]
+                          author={'__typename': 'User', 'login': c['author']}) for c in state['comments']]
             self.reply(200, json.dumps({'data': {'viewer': {'login': 'viewer'}, 'repository': {
                 'pullRequest': {'headRefOid': state['head'], 'comments': {
                     'nodes': nodes, 'pageInfo': {'hasNextPage': False, 'endCursor': None}}}}}}
