@@ -72,14 +72,19 @@ def read_through_plugin(plugin, change):
         return [json.loads(line) for line in reads.read_text().splitlines()]
 
 
+def usable_comment(node, change):
+    author = node['author']
+    return (isinstance(node['id'], str) and type(node['databaseId']) is int
+            and node['url'] == '%s#issuecomment-%d' % (change, node['databaseId'])
+            and (author is None or (isinstance(author['__typename'], str)
+                                    and isinstance(author['login'], str))))
+
+
 def comment_page(answer, change):
     try:
         comments = answer['data']['repository']['pullRequest']['comments']
         nodes, page_info = comments['nodes'], comments['pageInfo']
-        usable = all(isinstance(node['id'], str) and isinstance(node['url'], str)
-                     and isinstance(node['databaseId'], int)
-                     and isinstance(node['author'], (dict, type(None)))
-                     for node in nodes) and isinstance(page_info, dict)
+        usable = all(usable_comment(node, change) for node in nodes) and isinstance(page_info, dict)
     except (KeyError, TypeError):
         usable = False
     if not usable:

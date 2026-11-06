@@ -241,15 +241,24 @@ mod published_contract {
         });
         assert!(stderr.contains("answers do not fit"), "{stderr}");
 
-        let stderr = check_tampered_wire(|wire| {
-            wire["actions_comment"]["databaseId"] = json!("not a number");
-        });
-        assert!(stderr.contains("answers do not fit"), "{stderr}");
+        for not_an_id in [json!("not a number"), json!(1.5), json!(1e300)] {
+            let stderr = check_tampered_wire(|wire| {
+                wire["actions_comment"]["databaseId"] = not_an_id.clone();
+            });
+            assert!(stderr.contains("answers do not fit"), "{stderr}");
+        }
+
+        let stderr = check_tampered_wire(|wire| wire["actions_rest_comment"]["id"] = json!("7"));
+        assert!(stderr.contains("id does not fit"), "{stderr}");
+
+        let stderr =
+            check_tampered_wire(|wire| wire["actions_rest_comment"]["user"]["type"] = json!(7));
+        assert!(stderr.contains("type does not fit"), "{stderr}");
 
         let stderr = check_tampered_wire(|wire| {
             wire["actions_comment"]["extra"] = json!("unselected");
         });
-        assert!(stderr.contains("does not select"), "{stderr}");
+        assert!(stderr.contains("do not round-trip"), "{stderr}");
 
         let stderr = check_tampered_wire(|wire| wire["actions_rest_comment"]["extra"] = json!(1));
         assert!(stderr.contains("does not declare extra"), "{stderr}");
@@ -265,7 +274,16 @@ mod published_contract {
         let broken = directory.path().join("broken");
         std::fs::write(&broken, "{ not parseable").unwrap();
         let wire = support("tests/fixtures/github-wire.json");
-        for arguments in [vec![&broken], vec![&wire, &broken]] {
+        let unstructured = directory.path().join("unstructured.json");
+        let mut missing = super::wire();
+        drop(
+            missing
+                .as_object_mut()
+                .unwrap()
+                .remove("actions_rest_comment"),
+        );
+        std::fs::write(&unstructured, missing.to_string()).unwrap();
+        for arguments in [vec![&broken], vec![&wire, &broken], vec![&unstructured]] {
             let refused = check(
                 &arguments
                     .iter()
@@ -309,6 +327,34 @@ mod published_contract {
         assert!(!refused.status.success(), "{refused:?}");
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(stderr.contains("does not declare issue_url"), "{stderr}");
+
+        for (published, moved_to, reason) in [
+            (
+                "issue_url: string;",
+                "issue_url: number;",
+                "issue_url does not fit",
+            ),
+            (
+                "\"issue-comment\": {",
+                "\"issue-comment-moved\": {",
+                "no longer declare issue-comment",
+            ),
+            (
+                "\"nullable-simple-user\": {",
+                "\"nullable-simple-user-moved\": {",
+                "no longer declare nullable-simple-user",
+            ),
+        ] {
+            std::fs::write(&moved, types.replace(published, moved_to)).unwrap();
+            let refused = check(&[
+                &wire,
+                &packages.join("graphql-schema/schema.graphql"),
+                &moved,
+            ]);
+            assert!(!refused.status.success(), "{refused:?}");
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert!(stderr.contains(reason), "{stderr}");
+        }
     }
 }
 
@@ -400,7 +446,6 @@ mod recording {
             .unwrap()
     }
 
-    /// Asserts a refused recording named `reason` and left the existing fixture alone.
     fn assert_refused_keeping_fixture(directory: &Path, plugin: &Path, reason: &str) {
         let output = directory.join("wire.json");
         std::fs::write(&output, "kept").unwrap();
@@ -578,11 +623,23 @@ mod recording {
         }
     }
 
+    fn page_with_node(node: Value) -> Value {
+        json!({"data": {"repository": {"pullRequest": {"comments": {
+            "nodes": [node], "pageInfo": {}}}}}})
+    }
+
     #[test]
     fn an_unusable_comment_page_keeps_the_existing_fixture() {
         for answer in [
             json!({"errors": [{"message": "refused"}]}),
             json!({"data": {"repository": {"pullRequest": null}}}),
+            page_with_node(json!({"id": "IC_1", "databaseId": true, "author": null,
+                                  "url": format!("{CHANGE}#issuecomment-1")})),
+            page_with_node(json!({"id": "IC_1", "databaseId": 7, "author": null,
+                                  "url": "https://github.com/other/repo/pull/1#issuecomment-7"})),
+            page_with_node(json!({"id": "IC_1", "databaseId": 7,
+                                  "url": format!("{CHANGE}#issuecomment-7"),
+                                  "author": {"__typename": "Bot"}})),
             json!({"data": {"repository": {"pullRequest": {"comments": {
                 "nodes": [{"id": "IC_1", "databaseId": 7, "url": "u", "author": "login"}],
                 "pageInfo": {}}}}}}),

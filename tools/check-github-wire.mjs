@@ -18,12 +18,31 @@ const fail = (reason) => {
   process.exit(1);
 };
 
-/** The top-level keys of one `"name": { ... }` schema declared in the REST types. */
-function restKeys(types, name) {
+/** Each top-level field's declared type in one `"name": { ... }` schema of the REST types. */
+function restFields(types, name) {
   const start = types.indexOf(`\n    "${name}": {\n`);
   if (start < 0) fail(`GitHub's REST types no longer declare ${name}`);
   const body = types.slice(start, types.indexOf('\n    };\n', start));
-  return new Set([...body.matchAll(/^ {6}"?([a-z_]+)"?\??:/gm)].map((match) => match[1]));
+  return new Map([...body.matchAll(/^ {6}"?([a-z_]+)"?\??: (.+);$/gm)].map((match) => [match[1], match[2]]));
+}
+
+/** Whether a recorded JSON value is what a declared TypeScript union allows. */
+function fits(value, declared) {
+  return declared.split('|').map((type) => type.trim()).some((type) => {
+    if (type === 'null') return value === null;
+    if (type === 'bigint') return Number.isInteger(value);
+    if (type.startsWith('components[')) return typeof value === 'object' && value !== null;
+    return typeof value === type;
+  });
+}
+
+function checkRest(recorded, fields, name) {
+  for (const [key, value] of Object.entries(recorded)) {
+    if (!fields.has(key)) fail(`GitHub's REST ${name} does not declare ${key}`);
+    if (!fits(value, fields.get(key))) {
+      fail(`the recorded REST ${name} ${key} does not fit ${fields.get(key)}`);
+    }
+  }
 }
 
 // GitHub answers databaseId past the 32 bits its schema's Int declares (the fixture records one),
@@ -33,28 +52,28 @@ GraphQLInt.serialize = (value) => {
   return value;
 };
 
-let wire, schema, document;
+let wire, schema, document, rest, data;
 try {
   wire = JSON.parse(readFileSync(wirePath, 'utf8'));
   // The published SDL repeats two unrelated enterprise fields, so its own validity is not checked.
   schema = buildSchema(readFileSync(schemaPath, 'utf8'), { assumeValid: true, assumeValidSDL: true });
   document = parse(wire.query);
+  rest = wire.actions_rest_comment;
+  data = {
+    viewer: { login: rest.user.login },
+    repository: {
+      pullRequest: {
+        headRefOid: '0'.repeat(40),
+        comments: { nodes: [wire.actions_comment, wire.person_comment], pageInfo: wire.page_info },
+      },
+    },
+  };
 } catch (error) {
   fail(`could not read the recording or the published schema: ${error.message}`);
 }
 const invalid = validate(schema, document);
 if (invalid.length) fail(`the recorded query does not fit GitHub's schema: ${invalid[0].message}`);
 
-const rest = wire.actions_rest_comment;
-const data = {
-  viewer: { login: rest.user.login },
-  repository: {
-    pullRequest: {
-      headRefOid: '0'.repeat(40),
-      comments: { nodes: [wire.actions_comment, wire.person_comment], pageInfo: wire.page_info },
-    },
-  },
-};
 const answered = await execute({
   schema,
   document,
@@ -67,15 +86,9 @@ if (answered.errors?.length) {
 try {
   assert.deepEqual(JSON.parse(JSON.stringify(answered.data)), data);
 } catch {
-  fail('the recorded answers hold fields the recorded query does not select');
+  fail('the recorded answers do not round-trip through the recorded query');
 }
 
 const types = readFileSync(restPath, 'utf8');
-const declared = restKeys(types, 'issue-comment');
-const user = restKeys(types, 'nullable-simple-user');
-for (const key of Object.keys(rest)) {
-  if (!declared.has(key)) fail(`GitHub's REST issue comment does not declare ${key}`);
-}
-for (const key of Object.keys(rest.user)) {
-  if (!user.has(key)) fail(`GitHub's REST user does not declare ${key}`);
-}
+checkRest(rest, restFields(types, 'issue-comment'), 'issue comment');
+checkRest(rest.user, restFields(types, 'nullable-simple-user'), 'user');
