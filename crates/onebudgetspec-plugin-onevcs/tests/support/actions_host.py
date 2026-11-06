@@ -50,7 +50,10 @@ def serve(path, wire):
             self.write_comment(state, comment, payload)
 
         def payload(self):
-            payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            try:
+                payload = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+            except ValueError:
+                return {}
             return payload if isinstance(payload, dict) else {}
 
         def read_comments(self, state, payload):

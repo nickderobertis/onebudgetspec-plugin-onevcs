@@ -189,6 +189,129 @@ fn the_recording_holds_the_actions_bots_two_spellings() {
     );
 }
 
+/// The offline drift gate on GitHub's side: tools/check-github-wire.mjs against the published
+/// schema pinned in bun.lock, so upgrading those packages tests the recording.
+mod published_contract {
+    use super::*;
+
+    fn check(arguments: &[&Path]) -> std::process::Output {
+        Command::new("node")
+            .arg(support("../../tools/check-github-wire.mjs"))
+            .args(arguments)
+            .output()
+            .unwrap()
+    }
+
+    fn check_tampered_wire(tamper: impl FnOnce(&mut Value)) -> String {
+        let directory = tempfile::tempdir().unwrap();
+        let mut tampered = wire();
+        tamper(&mut tampered);
+        let path = directory.path().join("wire.json");
+        std::fs::write(&path, tampered.to_string()).unwrap();
+        let refused = check(&[&path]);
+        assert!(!refused.status.success(), "{refused:?}");
+        String::from_utf8_lossy(&refused.stderr).into_owned()
+    }
+
+    #[test]
+    fn the_recording_conforms_to_githubs_published_contract() {
+        let checked = check(&[]);
+        assert!(checked.status.success(), "{checked:?}");
+    }
+
+    #[test]
+    fn refuses_a_recorded_query_or_answer_github_does_not_declare() {
+        let stderr = check_tampered_wire(|wire| {
+            wire["query"] = json!(
+                wire["query"]
+                    .as_str()
+                    .unwrap()
+                    .replace("headRefOid", "headRefOidRenamed")
+            );
+        });
+        assert!(stderr.contains("query does not fit"), "{stderr}");
+
+        let stderr = check_tampered_wire(|wire| {
+            drop(
+                wire["actions_comment"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("url"),
+            );
+        });
+        assert!(stderr.contains("answers do not fit"), "{stderr}");
+
+        let stderr = check_tampered_wire(|wire| {
+            wire["actions_comment"]["databaseId"] = json!("not a number");
+        });
+        assert!(stderr.contains("answers do not fit"), "{stderr}");
+
+        let stderr = check_tampered_wire(|wire| {
+            wire["actions_comment"]["extra"] = json!("unselected");
+        });
+        assert!(stderr.contains("does not select"), "{stderr}");
+
+        let stderr = check_tampered_wire(|wire| wire["actions_rest_comment"]["extra"] = json!(1));
+        assert!(stderr.contains("does not declare extra"), "{stderr}");
+
+        let stderr =
+            check_tampered_wire(|wire| wire["actions_rest_comment"]["user"]["extra"] = json!(1));
+        assert!(stderr.contains("does not declare extra"), "{stderr}");
+    }
+
+    #[test]
+    fn an_unreadable_contract_or_recording_fails_with_a_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        let broken = directory.path().join("broken");
+        std::fs::write(&broken, "{ not parseable").unwrap();
+        let wire = support("tests/fixtures/github-wire.json");
+        for arguments in [vec![&broken], vec![&wire, &broken]] {
+            let refused = check(
+                &arguments
+                    .iter()
+                    .map(|path| path.as_path())
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert!(
+                stderr.starts_with("github wire: could not read"),
+                "{stderr}"
+            );
+        }
+    }
+
+    /// What a package upgrade would bring: GitHub dropping a field the recording depends on.
+    #[test]
+    fn refuses_a_published_contract_that_moved_away_from_the_recording() {
+        let packages = support("../../node_modules/@octokit");
+        let directory = tempfile::tempdir().unwrap();
+        let wire = support("tests/fixtures/github-wire.json");
+
+        let schema = std::fs::read_to_string(packages.join("graphql-schema/schema.graphql"))
+            .unwrap()
+            .replace("headRefOid: GitObjectID!", "headRefOidMoved: GitObjectID!");
+        let moved = directory.path().join("schema.graphql");
+        std::fs::write(&moved, schema).unwrap();
+        let refused = check(&[&wire, &moved]);
+        assert!(!refused.status.success(), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("headRefOid"), "{stderr}");
+
+        let types = std::fs::read_to_string(packages.join("openapi-types/types.d.ts")).unwrap();
+        let moved = directory.path().join("types.d.ts");
+        std::fs::write(&moved, types.replace("      issue_url: string;\n", "")).unwrap();
+        let refused = check(&[
+            &wire,
+            &packages.join("graphql-schema/schema.graphql"),
+            &moved,
+        ]);
+        assert!(!refused.status.success(), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("does not declare issue_url"), "{stderr}");
+    }
+}
+
 mod recording {
     use super::*;
 
@@ -417,7 +540,7 @@ mod recording {
 
     #[test]
     fn a_rest_answer_about_another_comment_keeps_the_existing_fixture() {
-        for change in ["id", "user", "html_url", "url", "issue_url"] {
+        for change in ["id", "user", "html_url", "url", "issue_url", "null_user"] {
             let directory = tempfile::tempdir().unwrap();
             stub_gh(directory.path(), &["Bot", "User"]);
             let mut rest = rest_answer();
@@ -426,6 +549,7 @@ mod recording {
                 "user" => rest["user"]["login"] = json!("dependabot[bot]"),
                 "url" => rest["url"] = json!("https://api.github.com/repos/o/r/issues/comments/7"),
                 "issue_url" => rest["issue_url"] = json!(null),
+                "null_user" => rest["user"] = json!(null),
                 _ => drop(rest.as_object_mut().unwrap().remove(change)),
             }
             std::fs::write(directory.path().join("rest.json"), rest.to_string()).unwrap();
@@ -459,6 +583,11 @@ mod recording {
         for answer in [
             json!({"errors": [{"message": "refused"}]}),
             json!({"data": {"repository": {"pullRequest": null}}}),
+            json!({"data": {"repository": {"pullRequest": {"comments": {
+                "nodes": [{"id": "IC_1", "databaseId": 7, "url": "u", "author": "login"}],
+                "pageInfo": {}}}}}}),
+            json!({"data": {"repository": {"pullRequest": {"comments": {
+                "nodes": [], "pageInfo": []}}}}}),
             json!({"data": {"repository": {"pullRequest": {"comments": {
                 "nodes": [{"id": "IC_1"}], "pageInfo": {}}}}}}),
         ] {

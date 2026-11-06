@@ -44,7 +44,7 @@ def stand_in_for_gh(args, reads):
     sys.stdout.buffer.write(answer.stdout)
 
 
-def plugin_answer(stdout):
+def json_object(stdout):
     try:
         result = json.loads(stdout)
     except ValueError:
@@ -62,7 +62,7 @@ def read_through_plugin(plugin, change):
                                 env={**os.environ, 'ONEVCS_GH': str(Path(__file__).resolve()),
                                      RECORDING: str(reads)},
                                 stdout=subprocess.PIPE, check=False)
-        result = plugin_answer(answer.stdout)
+        result = json_object(answer.stdout)
         diagnostic = result.get('diagnostic')
         # Every page read and the head refused is the only way this run can finish well.
         if (answer.returncode or result.get('delivered') is not False or not reads.exists()
@@ -77,8 +77,9 @@ def comment_page(answer, change):
         comments = answer['data']['repository']['pullRequest']['comments']
         nodes, page_info = comments['nodes'], comments['pageInfo']
         usable = all(isinstance(node['id'], str) and isinstance(node['url'], str)
-                     and isinstance(node['databaseId'], int) and 'author' in node
-                     for node in nodes)
+                     and isinstance(node['databaseId'], int)
+                     and isinstance(node['author'], (dict, type(None)))
+                     for node in nodes) and isinstance(page_info, dict)
     except (KeyError, TypeError):
         usable = False
     if not usable:
@@ -105,8 +106,9 @@ def rest_comment(change, comment):
     if answer.returncode:
         sys.exit('could not read comment %d over REST; check gh auth status and retry.'
                  % comment['databaseId'])
-    rest = json.loads(answer.stdout)
-    user = {key: rest.get('user', {}).get(key) for key in ACTIONS_REST_USER}
+    rest = json_object(answer.stdout)
+    rest_user = rest.get('user')
+    user = {key: rest_user.get(key) for key in ACTIONS_REST_USER} if isinstance(rest_user, dict) else None
     identities = {'id': comment['databaseId'], 'node_id': comment['id'],
                   'url': '%scomments/%d' % (api, comment['databaseId']),
                   'html_url': comment['url'], 'issue_url': api + number}

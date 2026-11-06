@@ -100,8 +100,8 @@ with isolated temporary host state, never modifying the host registry.
 
 The plugin crate's journeys run real `gh` (preinstalled on CI's runners) against a local
 server, offline. `tests/fixtures/github-wire.json` holds GitHub's answers; `just record-github-wire`
-re-records it read-only from public comments and needs `gh auth`. Run it when the query test
-fails after a onevcs upgrade, or to check for GitHub drift, then review the fixture's diff.
+re-records it read-only from public comments and needs `gh auth`. Run it when a wire test fails
+after a onevcs or `@octokit` package upgrade, or to check for GitHub drift, then review its diff.
 
 ## Releases and credentials
 
