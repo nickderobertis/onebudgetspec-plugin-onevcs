@@ -417,13 +417,15 @@ mod recording {
 
     #[test]
     fn a_rest_answer_about_another_comment_keeps_the_existing_fixture() {
-        for change in ["id", "user", "html_url"] {
+        for change in ["id", "user", "html_url", "url", "issue_url"] {
             let directory = tempfile::tempdir().unwrap();
             stub_gh(directory.path(), &["Bot", "User"]);
             let mut rest = rest_answer();
             match change {
                 "id" => rest["id"] = json!(8),
                 "user" => rest["user"]["login"] = json!("dependabot[bot]"),
+                "url" => rest["url"] = json!("https://api.github.com/repos/o/r/issues/comments/7"),
+                "issue_url" => rest["issue_url"] = json!(null),
                 _ => drop(rest.as_object_mut().unwrap().remove(change)),
             }
             std::fs::write(directory.path().join("rest.json"), rest.to_string()).unwrap();
@@ -441,11 +443,42 @@ mod recording {
             r#"{"delivered":true,"url":"u"}"#,
             r#"{"delivered":false,"diagnostic":"something else"}"#,
             r#"{"delivered":false,"diagnostic":"expected head x but nothing was read"}"#,
+            r#"{"delivered":false,"diagnostic":1}"#,
+            "[]",
+            "not json",
         ] {
             let directory = tempfile::tempdir().unwrap();
             stub_gh(directory.path(), &["Bot", "User"]);
             let plugin = stub_plugin(directory.path(), answer);
             assert_refused_keeping_fixture(directory.path(), &plugin, "could not read");
+        }
+    }
+
+    #[test]
+    fn an_unusable_comment_page_keeps_the_existing_fixture() {
+        for answer in [
+            json!({"errors": [{"message": "refused"}]}),
+            json!({"data": {"repository": {"pullRequest": null}}}),
+            json!({"data": {"repository": {"pullRequest": {"comments": {
+                "nodes": [{"id": "IC_1"}], "pageInfo": {}}}}}}),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let read = json!({"query": "query", "answer": answer});
+            let plugin = directory.path().join("stub-plugin");
+            std::fs::write(
+                &plugin,
+                format!(
+                    "#!/bin/sh\ncat > /dev/null\necho '{read}' > \"$RECORD_GITHUB_WIRE_READS\"\n\
+                     echo '{{\"delivered\":false,\"diagnostic\":\"expected head x\"}}'\n"
+                ),
+            )
+            .unwrap();
+            Command::new("chmod")
+                .arg("+x")
+                .arg(&plugin)
+                .status()
+                .unwrap();
+            assert_refused_keeping_fixture(directory.path(), &plugin, "unusable comment page");
         }
     }
 
@@ -475,7 +508,9 @@ mod recording {
         stub_gh(directory.path(), &["Bot"]);
         let read = "query=query { viewer { login } }";
         let mutation = "query=mutation { addComment { clientMutationId } }";
-        let writes: [&[&str]; 5] = [
+        let smuggled = ["api", "graphql", "-f", read, "-f", mutation];
+        let writes: [&[&str]; 6] = [
+            &smuggled,
             &[
                 "api",
                 "--method",

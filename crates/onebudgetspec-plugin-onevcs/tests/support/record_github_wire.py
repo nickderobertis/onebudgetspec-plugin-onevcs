@@ -5,6 +5,10 @@
 change, with this script standing in as `gh`. The plugin picks the query, real `gh` answers it,
 and the stated head never matches, so onevcs writes nothing; a write would be refused here too.
 Comment bodies are elided: only the wire shape and identities are kept.
+
+Exit 0: PATH holds the recording. Exit 1: nothing could be recorded, the reason is on stderr, and
+PATH is untouched. Exit 2: the arguments were refused. Standing in for `gh`, a failing `gh`'s own
+status is passed through, and a refused operation exits 1.
 """
 import argparse
 import json
@@ -17,7 +21,7 @@ import tempfile
 
 RECORDING = 'RECORD_GITHUB_WIRE_READS'
 UNMATCHED_HEAD = '0' * 40
-CHANGE = re.compile(r'https://github\.com/([\w.-]+)/([\w.-]+)/pull/[1-9][0-9]*')
+CHANGE = re.compile(r'https://github\.com/([\w.-]+)/([\w.-]+)/pull/([1-9][0-9]*)')
 REST_FIELDS = ('id', 'node_id', 'url', 'html_url', 'issue_url')
 ACTIONS_AUTHOR = {'__typename': 'Bot', 'login': 'github-actions'}
 ACTIONS_REST_USER = {'login': 'github-actions[bot]', 'type': 'Bot'}
@@ -25,7 +29,9 @@ ACTIONS_REST_USER = {'login': 'github-actions[bot]', 'type': 'Bot'}
 
 def stand_in_for_gh(args, reads):
     fields = args[2:]
-    query = next((a.split('=', 1)[1] for a in fields if a.startswith('query=')), '')
+    values = fields[1::2]
+    queries = [value.split('=', 1)[1] for value in values if value.startswith('query=')]
+    query = queries[0] if len(queries) == 1 else ''
     # Only `api graphql` and its field flags pass, so no spelling of a method override can.
     if (args[:2] != ['api', 'graphql'] or len(fields) % 2 or set(fields[::2]) - {'-f', '-F'}
             or not query.startswith('query') or re.search(r'\bmutation\b', query)):
@@ -38,6 +44,14 @@ def stand_in_for_gh(args, reads):
     sys.stdout.buffer.write(answer.stdout)
 
 
+def plugin_answer(stdout):
+    try:
+        result = json.loads(stdout)
+    except ValueError:
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
 def read_through_plugin(plugin, change):
     with tempfile.TemporaryDirectory() as scratch:
         reads = Path(scratch) / 'reads.jsonl'
@@ -48,26 +62,43 @@ def read_through_plugin(plugin, change):
                                 env={**os.environ, 'ONEVCS_GH': str(Path(__file__).resolve()),
                                      RECORDING: str(reads)},
                                 stdout=subprocess.PIPE, check=False)
-        result = json.loads(answer.stdout or '{}')
+        result = plugin_answer(answer.stdout)
+        diagnostic = result.get('diagnostic')
         # Every page read and the head refused is the only way this run can finish well.
         if (answer.returncode or result.get('delivered') is not False or not reads.exists()
-                or 'expected head' not in (result.get('diagnostic') or '')):
+                or not isinstance(diagnostic, str) or 'expected head' not in diagnostic):
             sys.exit('could not read %s through the plugin: %s; check gh auth status and retry.'
-                     % (change, result.get('diagnostic') or answer.stdout.decode()))
+                     % (change, answer.stdout.decode(errors='replace').strip()))
         return [json.loads(line) for line in reads.read_text().splitlines()]
+
+
+def comment_page(answer, change):
+    try:
+        comments = answer['data']['repository']['pullRequest']['comments']
+        nodes, page_info = comments['nodes'], comments['pageInfo']
+        usable = all(isinstance(node['id'], str) and isinstance(node['url'], str)
+                     and isinstance(node['databaseId'], int) and 'author' in node
+                     for node in nodes)
+    except (KeyError, TypeError):
+        usable = False
+    if not usable:
+        sys.exit('%s answered an unusable comment page: %s' % (change, json.dumps(answer)[:200]))
+    return nodes, page_info
 
 
 def first_comment(reads, wanted, change):
     for read in reads:
-        comments = read['answer']['data']['repository']['pullRequest']['comments']
-        for node in comments['nodes']:
-            author = node.get('author') or {}
+        nodes, page_info = comment_page(read['answer'], change)
+        for node in nodes:
+            author = node['author'] or {}
             if all(author.get(key) == value for key, value in wanted.items()):
-                return {**node, 'body': ''}, comments['pageInfo']
+                return {**node, 'body': ''}, page_info
     sys.exit('%s holds no comment by %s; pass a change that does.' % (change, wanted))
 
 
-def rest_comment(owner, name, comment):
+def rest_comment(change, comment):
+    owner, name, number = CHANGE.fullmatch(change).groups()
+    api = 'https://api.github.com/repos/%s/%s/issues/' % (owner, name)
     answer = subprocess.run(
         ['gh', 'api', 'repos/%s/%s/issues/comments/%d' % (owner, name, comment['databaseId'])],
         stdout=subprocess.PIPE, check=False)
@@ -76,8 +107,10 @@ def rest_comment(owner, name, comment):
                  % comment['databaseId'])
     rest = json.loads(answer.stdout)
     user = {key: rest.get('user', {}).get(key) for key in ACTIONS_REST_USER}
-    if (any(field not in rest for field in REST_FIELDS) or rest['id'] != comment['databaseId']
-            or rest['node_id'] != comment['id'] or user != ACTIONS_REST_USER):
+    identities = {'id': comment['databaseId'], 'node_id': comment['id'],
+                  'url': '%scomments/%d' % (api, comment['databaseId']),
+                  'html_url': comment['url'], 'issue_url': api + number}
+    if {field: rest.get(field) for field in REST_FIELDS} != identities or user != ACTIONS_REST_USER:
         sys.exit('the REST answer for comment %d is not that Actions comment: %s'
                  % (comment['databaseId'], sorted(rest)))
     return {**{field: rest[field] for field in REST_FIELDS}, 'body': '', 'user': user}
@@ -88,8 +121,7 @@ def record(arguments):
     actions, page_info = first_comment(actions_reads, ACTIONS_AUTHOR, arguments.actions_change)
     person, _ = first_comment(read_through_plugin(arguments.plugin, arguments.person_change),
                               {'__typename': 'User'}, arguments.person_change)
-    owner, name = CHANGE.fullmatch(arguments.actions_change).groups()
-    rest = rest_comment(owner, name, actions)
+    rest = rest_comment(arguments.actions_change, actions)
     arguments.output.write_text(json.dumps({
         'source': {'actions_change': arguments.actions_change,
                    'person_change': arguments.person_change},
