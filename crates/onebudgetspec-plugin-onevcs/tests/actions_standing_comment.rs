@@ -194,13 +194,21 @@ mod recording {
 
     const CHANGE: &str = "https://github.com/owner/repo/pull/1";
 
+    fn rest_answer() -> Value {
+        json!({"id": 7, "node_id": "IC_1", "body": "secret body", "extra": "dropped",
+               "url": "https://api.github.com/repos/owner/repo/issues/comments/7",
+               "html_url": format!("{CHANGE}#issuecomment-7"),
+               "issue_url": "https://api.github.com/repos/owner/repo/issues/1",
+               "user": {"login": "github-actions[bot]", "type": "Bot", "extra": "dropped"}})
+    }
+
     fn page(author_types: &[&str], next_cursor: Option<&str>) -> Value {
         let nodes: Vec<Value> = author_types
             .iter()
             .map(|author_type| {
                 json!({"id": "IC_1", "databaseId": 7, "url": format!("{CHANGE}#issuecomment-7"),
                        "body": "secret body",
-                       "author": {"__typename": author_type, "login": "a"}})
+                       "author": {"__typename": author_type, "login": "github-actions"}})
             })
             .collect();
         json!({"data": {"viewer": {"login": "someone"}, "repository": {"pullRequest": {
@@ -212,8 +220,7 @@ mod recording {
 
     /// A `gh` on PATH answering one first comment page and, for a cursor, a second.
     fn stub_gh_pages(directory: &Path, first: &Value, second: &Value) {
-        let rest = json!({"id": 7, "node_id": "IC_1", "body": "secret body", "extra": "dropped",
-                          "user": {"login": "a[bot]", "type": "Bot", "extra": "dropped"}});
+        let rest = rest_answer();
         std::fs::write(directory.join("first.json"), first.to_string()).unwrap();
         std::fs::write(directory.join("second.json"), second.to_string()).unwrap();
         std::fs::write(directory.join("rest.json"), rest.to_string()).unwrap();
@@ -256,16 +263,49 @@ mod recording {
     }
 
     fn record(directory: &Path, output: &Path) -> std::process::Output {
+        record_with(directory, real_plugin(), output)
+    }
+
+    fn record_with(directory: &Path, plugin: &Path, output: &Path) -> std::process::Output {
         recorder(directory)
-            .args([
-                "--plugin",
-                env!("CARGO_BIN_EXE_onebudgetspec-plugin-onevcs"),
-            ])
+            .arg("--plugin")
+            .arg(plugin)
             .arg("--output")
             .arg(output)
             .args(["--actions-change", CHANGE, "--person-change", CHANGE])
             .output()
             .unwrap()
+    }
+
+    /// Asserts a refused recording named `reason` and left the existing fixture alone.
+    fn assert_refused_keeping_fixture(directory: &Path, plugin: &Path, reason: &str) {
+        let output = directory.join("wire.json");
+        std::fs::write(&output, "kept").unwrap();
+        let refused = record_with(directory, plugin, &output);
+        assert!(!refused.status.success(), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains(reason), "{stderr}");
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "kept");
+    }
+
+    fn real_plugin() -> &'static Path {
+        Path::new(env!("CARGO_BIN_EXE_onebudgetspec-plugin-onevcs"))
+    }
+
+    /// A plugin that answers `answer` without reading anything.
+    fn stub_plugin(directory: &Path, answer: &str) -> PathBuf {
+        let plugin = directory.join("stub-plugin");
+        std::fs::write(
+            &plugin,
+            format!("#!/bin/sh\ncat > /dev/null\necho '{answer}'\n"),
+        )
+        .unwrap();
+        Command::new("chmod")
+            .arg("+x")
+            .arg(&plugin)
+            .status()
+            .unwrap();
+        plugin
     }
 
     #[test]
@@ -284,7 +324,10 @@ mod recording {
         assert_eq!(
             wire["actions_rest_comment"],
             json!({"id": 7, "node_id": "IC_1", "body": "",
-                   "user": {"login": "a[bot]", "type": "Bot"}})
+                   "url": "https://api.github.com/repos/owner/repo/issues/comments/7",
+                   "html_url": format!("{CHANGE}#issuecomment-7"),
+                   "issue_url": "https://api.github.com/repos/owner/repo/issues/1",
+                   "user": {"login": "github-actions[bot]", "type": "Bot"}})
         );
         assert!(!wire.to_string().contains("secret body"), "{wire}");
         let calls = std::fs::read_to_string(directory.path().join("calls")).unwrap();
@@ -301,7 +344,7 @@ mod recording {
 
         assert!(!refused.status.success(), "{refused:?}");
         let stderr = String::from_utf8_lossy(&refused.stderr);
-        assert!(stderr.contains("holds no comment by a User"), "{stderr}");
+        assert!(stderr.contains("holds no comment by"), "{stderr}");
         assert!(!output.exists(), "a failed recording must leave no fixture");
     }
 
@@ -348,6 +391,65 @@ mod recording {
     }
 
     #[test]
+    fn another_bots_comment_is_not_recorded_as_the_actions_bots() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut dependabot = page(&["Bot", "User"], None);
+        dependabot["data"]["repository"]["pullRequest"]["comments"]["nodes"][0]["author"]["login"] =
+            json!("dependabot");
+        stub_gh_pages(directory.path(), &dependabot, &page(&[], None));
+        assert_refused_keeping_fixture(directory.path(), real_plugin(), "holds no comment by");
+    }
+
+    #[test]
+    fn a_failing_rest_read_keeps_the_existing_fixture() {
+        let directory = tempfile::tempdir().unwrap();
+        stub_gh(directory.path(), &["Bot", "User"]);
+        let graphql = directory.path().join("first.json");
+        write_gh(
+            directory.path(),
+            &format!(
+                "case \"$*\" in\n*graphql*) cat {} ;;\n*) exit 1 ;;\nesac\n",
+                graphql.display()
+            ),
+        );
+        assert_refused_keeping_fixture(directory.path(), real_plugin(), "over REST");
+    }
+
+    #[test]
+    fn a_rest_answer_about_another_comment_keeps_the_existing_fixture() {
+        for change in ["id", "user", "html_url"] {
+            let directory = tempfile::tempdir().unwrap();
+            stub_gh(directory.path(), &["Bot", "User"]);
+            let mut rest = rest_answer();
+            match change {
+                "id" => rest["id"] = json!(8),
+                "user" => rest["user"]["login"] = json!("dependabot[bot]"),
+                _ => drop(rest.as_object_mut().unwrap().remove(change)),
+            }
+            std::fs::write(directory.path().join("rest.json"), rest.to_string()).unwrap();
+            assert_refused_keeping_fixture(
+                directory.path(),
+                real_plugin(),
+                "is not that Actions comment",
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_refused_head_after_real_reads_counts_as_a_finished_recording() {
+        for answer in [
+            r#"{"delivered":true,"url":"u"}"#,
+            r#"{"delivered":false,"diagnostic":"something else"}"#,
+            r#"{"delivered":false,"diagnostic":"expected head x but nothing was read"}"#,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            stub_gh(directory.path(), &["Bot", "User"]);
+            let plugin = stub_plugin(directory.path(), answer);
+            assert_refused_keeping_fixture(directory.path(), &plugin, "could not read");
+        }
+    }
+
+    #[test]
     fn refuses_a_change_that_is_not_a_github_pull_request() {
         let directory = tempfile::tempdir().unwrap();
         stub_gh(directory.path(), &["Bot", "User"]);
@@ -371,27 +473,19 @@ mod recording {
     fn refuses_anything_but_a_graphql_read_while_standing_in_for_gh() {
         let directory = tempfile::tempdir().unwrap();
         stub_gh(directory.path(), &["Bot"]);
-        let writes: [&[&str]; 3] = [
+        let read = "query=query { viewer { login } }";
+        let mutation = "query=mutation { addComment { clientMutationId } }";
+        let writes: [&[&str]; 5] = [
             &[
                 "api",
                 "--method",
                 "PATCH",
                 "repos/owner/repo/issues/comments/7",
             ],
-            &[
-                "api",
-                "graphql",
-                "-f",
-                "query=mutation { addComment { clientMutationId } }",
-            ],
-            &[
-                "api",
-                "graphql",
-                "--method",
-                "DELETE",
-                "-f",
-                "query=query { viewer { login } }",
-            ],
+            &["api", "graphql", "-f", mutation],
+            &["api", "graphql", "--method", "DELETE", "-f", read],
+            &["api", "graphql", "-X", "DELETE", "-f", read],
+            &["api", "graphql", "--method=DELETE", "-f", read],
         ];
         for write in writes {
             let refused = recorder(directory.path())

@@ -19,12 +19,16 @@ RECORDING = 'RECORD_GITHUB_WIRE_READS'
 UNMATCHED_HEAD = '0' * 40
 CHANGE = re.compile(r'https://github\.com/([\w.-]+)/([\w.-]+)/pull/[1-9][0-9]*')
 REST_FIELDS = ('id', 'node_id', 'url', 'html_url', 'issue_url')
+ACTIONS_AUTHOR = {'__typename': 'Bot', 'login': 'github-actions'}
+ACTIONS_REST_USER = {'login': 'github-actions[bot]', 'type': 'Bot'}
 
 
 def stand_in_for_gh(args, reads):
-    query = next((a.split('=', 1)[1] for a in args if a.startswith('query=')), '')
-    if (args[:2] != ['api', 'graphql'] or '--method' in args or not query.startswith('query')
-            or re.search(r'\bmutation\b', query)):
+    fields = args[2:]
+    query = next((a.split('=', 1)[1] for a in fields if a.startswith('query=')), '')
+    # Only `api graphql` and its field flags pass, so no spelling of a method override can.
+    if (args[:2] != ['api', 'graphql'] or len(fields) % 2 or set(fields[::2]) - {'-f', '-F'}
+            or not query.startswith('query') or re.search(r'\bmutation\b', query)):
         sys.exit('recording is read-only; refused: gh %s' % ' '.join(args[:2]))
     answer = subprocess.run(['gh'] + args, stdout=subprocess.PIPE, check=False)
     if answer.returncode:
@@ -53,24 +57,39 @@ def read_through_plugin(plugin, change):
         return [json.loads(line) for line in reads.read_text().splitlines()]
 
 
-def first_comment(reads, author_type, change):
+def first_comment(reads, wanted, change):
     for read in reads:
         comments = read['answer']['data']['repository']['pullRequest']['comments']
         for node in comments['nodes']:
-            if (node.get('author') or {}).get('__typename') == author_type:
+            author = node.get('author') or {}
+            if all(author.get(key) == value for key, value in wanted.items()):
                 return {**node, 'body': ''}, comments['pageInfo']
-    sys.exit('%s holds no comment by a %s; pass a change that does.' % (change, author_type))
+    sys.exit('%s holds no comment by %s; pass a change that does.' % (change, wanted))
+
+
+def rest_comment(owner, name, comment):
+    answer = subprocess.run(
+        ['gh', 'api', 'repos/%s/%s/issues/comments/%d' % (owner, name, comment['databaseId'])],
+        stdout=subprocess.PIPE, check=False)
+    if answer.returncode:
+        sys.exit('could not read comment %d over REST; check gh auth status and retry.'
+                 % comment['databaseId'])
+    rest = json.loads(answer.stdout)
+    user = {key: rest.get('user', {}).get(key) for key in ACTIONS_REST_USER}
+    if (any(field not in rest for field in REST_FIELDS) or rest['id'] != comment['databaseId']
+            or rest['node_id'] != comment['id'] or user != ACTIONS_REST_USER):
+        sys.exit('the REST answer for comment %d is not that Actions comment: %s'
+                 % (comment['databaseId'], sorted(rest)))
+    return {**{field: rest[field] for field in REST_FIELDS}, 'body': '', 'user': user}
 
 
 def record(arguments):
     actions_reads = read_through_plugin(arguments.plugin, arguments.actions_change)
-    actions, page_info = first_comment(actions_reads, 'Bot', arguments.actions_change)
+    actions, page_info = first_comment(actions_reads, ACTIONS_AUTHOR, arguments.actions_change)
     person, _ = first_comment(read_through_plugin(arguments.plugin, arguments.person_change),
-                              'User', arguments.person_change)
+                              {'__typename': 'User'}, arguments.person_change)
     owner, name = CHANGE.fullmatch(arguments.actions_change).groups()
-    rest = json.loads(subprocess.run(
-        ['gh', 'api', 'repos/%s/%s/issues/comments/%d' % (owner, name, actions['databaseId'])],
-        stdout=subprocess.PIPE, check=True).stdout)
+    rest = rest_comment(owner, name, actions)
     arguments.output.write_text(json.dumps({
         'source': {'actions_change': arguments.actions_change,
                    'person_change': arguments.person_change},
@@ -78,11 +97,7 @@ def record(arguments):
         'page_info': {**page_info, 'hasNextPage': False, 'endCursor': None},
         'actions_comment': actions,
         'person_comment': person,
-        'actions_rest_comment': {
-            **{field: rest[field] for field in REST_FIELDS if field in rest},
-            'body': '',
-            'user': {key: rest['user'][key] for key in ('login', 'type')},
-        },
+        'actions_rest_comment': rest,
     }, indent=2, sort_keys=True) + '\n')
 
 
