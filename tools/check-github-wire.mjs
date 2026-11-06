@@ -36,7 +36,10 @@ function fits(value, declared) {
   });
 }
 
-function checkRest(recorded, fields, name) {
+function checkRest(recorded, fields, name, required) {
+  for (const key of required) {
+    if (!(key in recorded)) fail(`the recorded REST ${name} lacks ${key}`);
+  }
   for (const [key, value] of Object.entries(recorded)) {
     if (!fields.has(key)) fail(`GitHub's REST ${name} does not declare ${key}`);
     if (!fits(value, fields.get(key))) {
@@ -90,5 +93,8 @@ try {
 }
 
 const types = readFileSync(restPath, 'utf8');
-checkRest(rest, restFields(types, 'issue-comment'), 'issue comment');
-checkRest(rest.user, restFields(types, 'nullable-simple-user'), 'user');
+const comment = restFields(types, 'issue-comment');
+checkRest(rest, comment, 'issue comment', ['id', 'node_id', 'url', 'html_url', 'issue_url', 'body', 'user']);
+const userSchema = /^components\["schemas"\]\["([a-z-]+)"\]$/.exec(comment.get('user'));
+if (!userSchema) fail(`GitHub's REST issue comment user is no longer a schema: ${comment.get('user')}`);
+checkRest(rest.user, restFields(types, userSchema[1]), 'user', ['login', 'type']);

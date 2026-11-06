@@ -248,6 +248,29 @@ mod published_contract {
             assert!(stderr.contains("answers do not fit"), "{stderr}");
         }
 
+        for required in [
+            "id",
+            "node_id",
+            "url",
+            "html_url",
+            "issue_url",
+            "body",
+            "user",
+        ] {
+            let stderr = check_tampered_wire(|wire| {
+                drop(
+                    wire["actions_rest_comment"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(required),
+                );
+            });
+            assert!(
+                stderr.contains(&format!("lacks {required}")) || stderr.contains("could not read"),
+                "{stderr}"
+            );
+        }
+
         let stderr = check_tampered_wire(|wire| wire["actions_rest_comment"]["id"] = json!("7"));
         assert!(stderr.contains("id does not fit"), "{stderr}");
 
@@ -327,6 +350,27 @@ mod published_contract {
         assert!(!refused.status.success(), "{refused:?}");
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(stderr.contains("does not declare issue_url"), "{stderr}");
+
+        // The comment's user moves to another schema, which the check must follow.
+        let comment = types.find("\"issue-comment\": {").unwrap();
+        let (before, after) = types.split_at(comment);
+        let moved_user = format!(
+            "{before}{}",
+            after.replacen(
+                "user: components[\"schemas\"][\"nullable-simple-user\"];",
+                "user: components[\"schemas\"][\"nullable-integration\"];",
+                1,
+            )
+        );
+        std::fs::write(&moved, moved_user).unwrap();
+        let refused = check(&[
+            &wire,
+            &packages.join("graphql-schema/schema.graphql"),
+            &moved,
+        ]);
+        assert!(!refused.status.success(), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("REST user does not declare"), "{stderr}");
 
         for (published, moved_to, reason) in [
             (
@@ -625,7 +669,7 @@ mod recording {
 
     fn page_with_node(node: Value) -> Value {
         json!({"data": {"repository": {"pullRequest": {"comments": {
-            "nodes": [node], "pageInfo": {}}}}}})
+            "nodes": [node], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}})
     }
 
     #[test]
@@ -633,6 +677,8 @@ mod recording {
         for answer in [
             json!({"errors": [{"message": "refused"}]}),
             json!({"data": {"repository": {"pullRequest": null}}}),
+            json!({"data": {"repository": {"pullRequest": {"comments": {
+                "nodes": [], "pageInfo": {"hasNextPage": "no", "endCursor": null}}}}}}),
             page_with_node(json!({"id": "IC_1", "databaseId": true, "author": null,
                                   "url": format!("{CHANGE}#issuecomment-1")})),
             page_with_node(json!({"id": "IC_1", "databaseId": 7, "author": null,
@@ -642,11 +688,11 @@ mod recording {
                                   "author": {"__typename": "Bot"}})),
             json!({"data": {"repository": {"pullRequest": {"comments": {
                 "nodes": [{"id": "IC_1", "databaseId": 7, "url": "u", "author": "login"}],
-                "pageInfo": {}}}}}}),
+                "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}}),
             json!({"data": {"repository": {"pullRequest": {"comments": {
                 "nodes": [], "pageInfo": []}}}}}),
             json!({"data": {"repository": {"pullRequest": {"comments": {
-                "nodes": [{"id": "IC_1"}], "pageInfo": {}}}}}}),
+                "nodes": [{"id": "IC_1"}], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}}),
         ] {
             let directory = tempfile::tempdir().unwrap();
             let read = json!({"query": "query", "answer": answer});

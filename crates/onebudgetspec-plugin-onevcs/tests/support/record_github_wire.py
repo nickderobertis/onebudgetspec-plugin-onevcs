@@ -84,7 +84,9 @@ def comment_page(answer, change):
     try:
         comments = answer['data']['repository']['pullRequest']['comments']
         nodes, page_info = comments['nodes'], comments['pageInfo']
-        usable = all(usable_comment(node, change) for node in nodes) and isinstance(page_info, dict)
+        usable = (all(usable_comment(node, change) for node in nodes)
+                  and isinstance(page_info['hasNextPage'], bool)
+                  and isinstance(page_info['endCursor'], (str, type(None))))
     except (KeyError, TypeError):
         usable = False
     if not usable:
