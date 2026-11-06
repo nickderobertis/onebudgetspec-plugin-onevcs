@@ -98,6 +98,11 @@ The declared release probe needs Python 3.11+ and curl; it reads public crates.i
 without credentials. Tests stub only that external registry and run real onevcs
 with isolated temporary host state, never modifying the host registry.
 
+The plugin crate's journeys run real `gh` (preinstalled on CI's runners) against a local
+server, offline. `tests/fixtures/github-wire.json` holds GitHub's answers; `just record-github-wire`
+re-records it read-only from public comments and needs `gh auth`. Run it when a wire test fails
+after a onevcs or `@octokit` package upgrade, or to check for GitHub drift, then review its diff.
+
 ## Releases and credentials
 
 Semantic versions and changelogs are computed by release-plz from Conventional

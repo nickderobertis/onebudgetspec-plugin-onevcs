@@ -14,6 +14,9 @@ import sys
 import urllib.error
 import urllib.request
 
+# The author shape GitHub was recorded answering; see the plugin crate's AGENTS.md.
+WIRE = Path(__file__).resolve().parents[3] / 'onebudgetspec-plugin-onevcs/tests/fixtures/github-wire.json'
+
 
 def serve(root):
     class Host(http.server.BaseHTTPRequestHandler):
@@ -52,8 +55,9 @@ def serve(root):
             if 'read_status' in state:
                 return self.fail(state['read_status'], 'read refused')
             variables = payload['variables']
+            person = json.loads(WIRE.read_text())['person_comment']['author']
             nodes = [dict(id=c['node_id'], databaseId=c['id'], url=c['html_url'], body=c['body'],
-                          author={'login': c['author']}) for c in state['comments']]
+                          author={**person, 'login': c['author']}) for c in state['comments']]
             self.reply(200, json.dumps({'data': {'viewer': {'login': 'viewer'}, 'repository': {
                 'pullRequest': {'headRefOid': state['head'], 'comments': {
                     'nodes': nodes, 'pageInfo': {'hasNextPage': False, 'endCursor': None}}}}}}

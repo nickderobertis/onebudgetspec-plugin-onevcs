@@ -1217,9 +1217,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.61.0"
+version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27ab89a43cb07ad287f9c85d7fa4e9e8a1c786bb9b80bd0478d44868424226e1"
+checksum = "34caacfb8539c18379f4e036ad98c81be1b763806eb41bc20c5a425313424222"
 dependencies = [
  "clap",
  "dunce",

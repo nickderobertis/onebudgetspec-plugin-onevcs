@@ -67,6 +67,15 @@ format:
 deny:
     bunx nx run workspace:deny --outputStyle=static
 
+# Re-record the GitHub wire fixture from real, public comments, read-only; needs `gh auth`.
+record-github-wire:
+    cargo build --locked -p onebudgetspec-plugin-onevcs
+    python3 -I crates/onebudgetspec-plugin-onevcs/tests/support/record_github_wire.py \
+        --plugin target/debug/onebudgetspec-plugin-onevcs \
+        --output crates/onebudgetspec-plugin-onevcs/tests/fixtures/github-wire.json \
+        --actions-change https://github.com/nickderobertis/onetaskgraph/pull/3904 \
+        --person-change https://github.com/nickderobertis/onetaskgraph/pull/3559
+
 # Upgrade every ecosystem's dependencies, then re-run the whole gate on the result.
 upgrade:
     bun update --latest

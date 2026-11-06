@@ -1,0 +1,43 @@
+{
+  "actions_comment": {
+    "author": {
+      "__typename": "Bot",
+      "login": "github-actions"
+    },
+    "body": "",
+    "databaseId": 6677782164,
+    "id": "IC_kwDOUBBgxs8AAAABjgbelA",
+    "url": "https://github.com/nickderobertis/onetaskgraph/pull/3904#issuecomment-6677782164"
+  },
+  "actions_rest_comment": {
+    "body": "",
+    "html_url": "https://github.com/nickderobertis/onetaskgraph/pull/3904#issuecomment-6677782164",
+    "id": 6677782164,
+    "issue_url": "https://api.github.com/repos/nickderobertis/onetaskgraph/issues/3904",
+    "node_id": "IC_kwDOUBBgxs8AAAABjgbelA",
+    "url": "https://api.github.com/repos/nickderobertis/onetaskgraph/issues/comments/6677782164",
+    "user": {
+      "login": "github-actions[bot]",
+      "type": "Bot"
+    }
+  },
+  "page_info": {
+    "endCursor": null,
+    "hasNextPage": false
+  },
+  "person_comment": {
+    "author": {
+      "__typename": "User",
+      "login": "nickderobertis"
+    },
+    "body": "",
+    "databaseId": 6053480126,
+    "id": "IC_kwDOUBBgxs8AAAABaNDGvg",
+    "url": "https://github.com/nickderobertis/onetaskgraph/pull/3559#issuecomment-6053480126"
+  },
+  "query": "query($owner:String!,$name:String!,$number:Int!,$after:String) { viewer { login } repository(owner:$owner,name:$name) { pullRequest(number:$number) { headRefOid comments(first:100,after:$after) { pageInfo { hasNextPage endCursor } nodes { id databaseId url body author { __typename login } } } } } }",
+  "source": {
+    "actions_change": "https://github.com/nickderobertis/onetaskgraph/pull/3904",
+    "person_change": "https://github.com/nickderobertis/onetaskgraph/pull/3559"
+  }
+}

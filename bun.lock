@@ -5,7 +5,10 @@
     "": {
       "name": "onebudgetspec-plugin-onevcs-workspace",
       "devDependencies": {
+        "@octokit/graphql-schema": "15.26.1",
+        "@octokit/openapi-types": "29.0.1",
         "@onebudgetspec/cli": "0.1.6",
+        "graphql": "16.15.0",
         "nx": "24.0.4",
       },
     },
@@ -44,6 +47,10 @@
     "@nx/nx-win32-arm64-msvc": ["@nx/nx-win32-arm64-msvc@24.0.4", "", { "os": "win32", "cpu": "arm64" }, "sha512-cAZfMwLTmFkm0+vWxnPp4Hv4XMyl1dOy7IJUJfOa8fwGdrvrtToyoCA3lQxd1IkL5+9/05RBAxDPT278rdVzmQ=="],
 
     "@nx/nx-win32-x64-msvc": ["@nx/nx-win32-x64-msvc@24.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-NQj/Iy0auDQysqBhin3u8XlmGfY4xLCrCU9a9G5Xrc99fak79ClZku6rZRfy2k8Cyoq1u1e/Kx2SVPnTda1E6Q=="],
+
+    "@octokit/graphql-schema": ["@octokit/graphql-schema@15.26.1", "", { "dependencies": { "graphql": "^16.0.0", "graphql-tag": "^2.10.3" } }, "sha512-RFDC2MpRBd4AxSRvUeBIVeBU7ojN/SxDfALUd7iVYOSeEK3gZaqR2MGOysj4Zh2xj2RY5fQAUT+Oqq7hWTraMA=="],
+
+    "@octokit/openapi-types": ["@octokit/openapi-types@29.0.1", "", {}, "sha512-9qWOMFNxxLokERcms42rU0PTLqQmVs7g5E41TI4mCOxmpFayD1rfC7XxOL55cG9MBZLFlC31BrR37myMKardwg=="],
 
     "@onebudgetspec/cli": ["@onebudgetspec/cli@0.1.6", "", { "optionalDependencies": { "@onebudgetspec/cli-darwin-arm64": "0.1.6", "@onebudgetspec/cli-linux-arm64": "0.1.6", "@onebudgetspec/cli-linux-x64": "0.1.6", "@onebudgetspec/cli-win32-arm64": "0.1.6", "@onebudgetspec/cli-win32-x64": "0.1.6" }, "bin": { "onebudgetspec": "bin/onebudgetspec.js" } }, "sha512-6WHxnuMYEOnGFPh3I3eJ9ky6Zdp7B2PXdJCIJEqparRW8RD+JUdPuz1fIaPiRL01AxArMoqWKezg1aGuZGrhgw=="],
 
@@ -120,6 +127,10 @@
     "fs-constants": ["fs-constants@1.0.0", "", {}, "sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow=="],
 
     "get-caller-file": ["get-caller-file@2.0.5", "", {}, "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg=="],
+
+    "graphql": ["graphql@16.15.0", "", {}, "sha512-32kz9FecohDiC/tgcViwnRXM7HFBVTPiW7pHO+DikKOI5KjhU/jNULOReXsrFqt2WAYbE9xFXsTffJw6iTO8qw=="],
+
+    "graphql-tag": ["graphql-tag@2.12.7", "", { "dependencies": { "tslib": "^2.1.0" }, "peerDependencies": { "graphql": "^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-xnE/NFzy+0eIesvAsREJZ284zTl/wYuBAvpsFSDhRGRdRHdnE90M21Q3xAWyYInb0J756c6x0pIQ62+vtvOs1Q=="],
 
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
 

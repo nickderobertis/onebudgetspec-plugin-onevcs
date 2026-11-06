@@ -13,7 +13,7 @@ assert_cmd = "2"
 clap = { version = "4", features = ["derive"] }
 jsonschema = { version = "0.56", default-features = false }
 onebudgetspec-core = "0.1.6"
-onevcs = "0.61.0"
+onevcs = "0.61.1"
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
 serde_json = "1"
