@@ -241,11 +241,19 @@ mod published_contract {
         });
         assert!(stderr.contains("answers do not fit"), "{stderr}");
 
-        for not_an_id in [json!("not a number"), json!(1.5), json!(1e300)] {
-            let stderr = check_tampered_wire(|wire| {
-                wire["actions_comment"]["databaseId"] = not_an_id.clone();
-            });
-            assert!(stderr.contains("answers do not fit"), "{stderr}");
+        for comment in ["actions_comment", "person_comment"] {
+            for not_an_id in [
+                json!("not a number"),
+                json!(1.5),
+                json!(1e300),
+                json!(9_007_199_254_740_992_u64),
+                json!(null),
+            ] {
+                let stderr = check_tampered_wire(|wire| {
+                    wire[comment]["databaseId"] = not_an_id.clone();
+                });
+                assert!(stderr.contains("is not a safe integer"), "{stderr}");
+            }
         }
 
         for required in [
@@ -289,6 +297,69 @@ mod published_contract {
         let stderr =
             check_tampered_wire(|wire| wire["actions_rest_comment"]["user"]["extra"] = json!(1));
         assert!(stderr.contains("does not declare extra"), "{stderr}");
+    }
+
+    /// Selects `pullRequest { field }` on each recorded comment, answering `value`.
+    fn wire_with_pull_request_int(field: &str, value: u64) -> tempfile::NamedTempFile {
+        let mut tampered = wire();
+        tampered["query"] = json!(
+            tampered["query"]
+                .as_str()
+                .unwrap()
+                .replace("author {", &format!("pullRequest {{ {field} }} author {{"))
+        );
+        for comment in ["actions_comment", "person_comment"] {
+            tampered[comment]["pullRequest"] = json!({field: value});
+        }
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), tampered.to_string()).unwrap();
+        file
+    }
+
+    /// The allowance covers `IssueComment.databaseId` alone: the same value in any other `Int`,
+    /// even another type's `databaseId`, fails standard validation.
+    #[test]
+    fn an_out_of_range_int_elsewhere_still_fails_the_contract_check() {
+        let in_range = check(&[wire_with_pull_request_int("number", 7).path()]);
+        assert!(in_range.status.success(), "{in_range:?}");
+
+        for field in ["number", "databaseId"] {
+            let refused = check(&[wire_with_pull_request_int(field, 6_677_782_164).path()]);
+            assert_eq!(refused.status.code(), Some(1), "{field}: {refused:?}");
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert!(
+                stderr.contains("Int cannot represent non 32-bit signed integer"),
+                "{field}: {stderr}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_allowance_ends_when_github_stops_declaring_the_comment_id_an_int() {
+        let packages = support("../../node_modules/@octokit");
+        let published =
+            std::fs::read_to_string(packages.join("graphql-schema/schema.graphql")).unwrap();
+        let comment = published.find("type IssueComment ").unwrap();
+        let (before, after) = published.split_at(comment);
+        let directory = tempfile::tempdir().unwrap();
+        let moved = directory.path().join("schema.graphql");
+        std::fs::write(
+            &moved,
+            format!(
+                "{before}{}",
+                after.replacen("databaseId: Int", "databaseId: BigInt", 1)
+            ),
+        )
+        .unwrap();
+
+        let refused = check(&[&support("tests/fixtures/github-wire.json"), &moved]);
+
+        assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            stderr.contains("IssueComment.databaseId is no longer"),
+            "{stderr}"
+        );
     }
 
     #[test]

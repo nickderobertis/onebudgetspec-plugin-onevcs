@@ -4,7 +4,7 @@
 // Exit 0: the fixture conforms. Exit 1: stderr names what moved and how to re-record.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GraphQLInt, buildSchema, execute, parse, validate } from 'graphql';
+import { GraphQLScalarType, buildSchema, execute, parse, validate } from 'graphql';
 
 const packages = new URL('../node_modules/@octokit/', import.meta.url);
 const [
@@ -48,13 +48,6 @@ function checkRest(recorded, fields, name, required) {
   }
 }
 
-// GitHub answers databaseId past the 32 bits its schema's Int declares (the fixture records one),
-// so Int here means any whole number; anything else still fails.
-GraphQLInt.serialize = (value) => {
-  if (!Number.isSafeInteger(value)) throw new TypeError(`Int cannot represent ${value}`);
-  return value;
-};
-
 let wire, schema, document, rest, data;
 try {
   wire = JSON.parse(readFileSync(wirePath, 'utf8'));
@@ -76,6 +69,25 @@ try {
 }
 const invalid = validate(schema, document);
 if (invalid.length) fail(`the recorded query does not fit GitHub's schema: ${invalid[0].message}`);
+
+// Observed upstream mismatch: @octokit/graphql-schema 15.26.1 declares `IssueComment.databaseId:
+// Int`, GraphQL's 32-bit type, yet GitHub answered 6677782164 for it on onetaskgraph#3904, the id
+// this fixture records. Only that field leaves Int's range check, and only while it is declared
+// Int; each recorded value must instead be a safe integer, which is checked here. Every other Int
+// keeps standard validation.
+const commentId = schema.getType('IssueComment')?.getFields().databaseId;
+if (String(commentId?.type) !== 'Int') {
+  fail(`GitHub's IssueComment.databaseId is no longer the Int this check allows past 32 bits: ${commentId?.type}`);
+}
+for (const recorded of [wire.actions_comment, wire.person_comment]) {
+  if (!Number.isSafeInteger(recorded?.databaseId)) {
+    fail(`the recorded IssueComment.databaseId ${recorded?.databaseId} is not a safe integer`);
+  }
+}
+commentId.type = new GraphQLScalarType({
+  name: 'RecordedIssueCommentDatabaseId',
+  serialize: (validated) => validated,
+});
 
 const answered = await execute({
   schema,
