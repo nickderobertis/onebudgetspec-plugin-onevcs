@@ -1,72 +1,78 @@
 #!/usr/bin/env python3
-# llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] This whole file doubles GitHub and gh for one journey: AGENTS.md excludes live tests, so no gate can reach GitHub, and onevcs owns this wire contract at its own boundary.
-"""GitHub as it answers the Actions token, and the `gh` executable that forwards to it.
+"""GitHub as it answers the Actions token, over plain HTTP for the real `gh` to reach.
 
-`serve STATE` answers from the STATE json file and prints its port once listening. Any other
-arguments are one `gh api` call, sent to ACTIONS_HOST. The two spellings below are the point:
-GraphQL names the viewer `github-actions[bot]` and the comments it wrote `github-actions`.
+`serve STATE WIRE` answers from the STATE json file and prints its port once listening. Every
+shape, identity and route comes from WIRE, the fixture record_github_wire.py recorded from
+GitHub, so re-recording is what moves them. Each query it receives is kept in STATE for the
+test that holds onevcs to the recorded one.
 """
 import http.server
 import json
-import os
 from pathlib import Path
-import re
 import sys
-import urllib.error
-import urllib.request
-
-VIEWER = 'github-actions[bot]'
-AUTHOR = {'__typename': 'Bot', 'login': 'github-actions'}
+from urllib.parse import urlparse
 
 
-def serve(path):
+def serve(path, wire):
+    recorded = wire['actions_comment']
+    rest = wire['actions_rest_comment']
+    owner, name, _, number = urlparse(wire['source']['actions_change']).path.split('/')[1:]
+    comments_route = urlparse(rest['issue_url']).path + '/comments'
+    comment_route = urlparse(rest['url']).path.rsplit('/', 1)[0] + '/'
+
     class Host(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_POST(self):
             payload = self.payload()
+            route = urlparse(self.path).path
             state = json.loads(path.read_text())
-            if self.path == '/graphql':
-                if payload.get('variables') != {'owner': 'owner', 'name': 'repo', 'number': 1}:
-                    return self.refuse(422, 'unexpected variables: %s' % payload.get('variables'))
-                return self.reply(self.read_comments(state))
-            if self.path != '/repos/owner/repo/issues/1/comments':
-                return self.refuse(404, 'no route: POST %s' % self.path)
-            number = 100 + len(state['comments'])
-            comment = {'id': 'node-%d' % number, 'databaseId': number, 'author': AUTHOR,
-                       'url': 'https://github.com/owner/repo/pull/1#issuecomment-%d' % number}
+            if route == '/graphql':
+                return self.read_comments(state, payload)
+            if route != comments_route:
+                return self.refuse(404, 'no route: POST %s' % route)
+            database_id = recorded['databaseId'] + len(state['comments'])
+            comment = {**recorded, 'id': '%s-%d' % (recorded['id'], database_id),
+                       'databaseId': database_id,
+                       'url': '%s#issuecomment-%d' % (recorded['url'].split('#')[0], database_id)}
             state['comments'].append(comment)
             self.write_comment(state, comment, payload)
 
         def do_PATCH(self):
             payload = self.payload()
+            route = urlparse(self.path).path
             state = json.loads(path.read_text())
-            route = re.fullmatch(r'/repos/owner/repo/issues/comments/(\d+)', self.path)
-            if not route:
-                return self.refuse(404, 'no route: PATCH %s' % self.path)
-            comment = next((c for c in state['comments'] if c['databaseId'] == int(route[1])), None)
+            comment = next((c for c in state['comments']
+                            if route == comment_route + str(c['databaseId'])), None)
             if comment is None:
-                return self.refuse(404, 'no comment %s' % route[1])
+                return self.refuse(404, 'no comment at: PATCH %s' % route)
             self.write_comment(state, comment, payload)
 
         def payload(self):
             payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             return payload if isinstance(payload, dict) else {}
 
-        def read_comments(self, state):
-            comments = {'nodes': state['comments'],
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None}}
-            return {'data': {'viewer': {'login': VIEWER}, 'repository': {'pullRequest': {
-                'headRefOid': state['head'], 'comments': comments}}}}
+        def read_comments(self, state, payload):
+            expected = {'owner': owner, 'name': name, 'number': int(number)}
+            if payload.get('variables') != expected:
+                return self.refuse(422, 'unexpected variables: %s' % payload.get('variables'))
+            state['queries'].append(payload.get('query'))
+            path.write_text(json.dumps(state))
+            self.reply({'data': {'viewer': {'login': rest['user']['login']}, 'repository': {
+                'pullRequest': {'headRefOid': state['head'], 'comments': {
+                    'nodes': state['comments'], 'pageInfo': wire['page_info']}}}}})
 
         def write_comment(self, state, comment, payload):
             if not isinstance(payload.get('body'), str):
                 return self.refuse(422, 'body must be a string')
             comment['body'] = payload['body']
             path.write_text(json.dumps(state))
-            self.reply({'node_id': comment['id'], 'html_url': comment['url'],
-                        'body': comment['body'], 'user': {'login': VIEWER}})
+            written = {'id': comment['databaseId'], 'node_id': comment['id'],
+                       'url': 'https://api.github.com%s%d' % (comment_route, comment['databaseId']),
+                       'html_url': comment['url'], 'issue_url': rest['issue_url'],
+                       'body': comment['body'], 'user': rest['user']}
+            self.reply({field: written[field] for field in rest})
 
         def refuse(self, status, message):
             self.reply({'message': message}, status)
@@ -74,6 +80,7 @@ def serve(path):
         def reply(self, answer, status=200):
             body = json.dumps(answer).encode()
             self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -83,35 +90,6 @@ def serve(path):
     server.serve_forever()
 
 
-def gh(args):
-    assert args.pop(0) == 'api', args
-    method = 'POST'
-    fields = {}
-    path = None
-    while args:
-        arg = args.pop(0)
-        if arg == '--method':
-            method = args.pop(0)
-        elif arg in ('-f', '-F'):
-            key, value = args.pop(0).split('=', 1)
-            fields[key] = int(value) if arg == '-F' else value
-        elif path is None and not arg.startswith('-'):
-            path = arg
-        else:
-            sys.exit('unsupported gh argument: %s' % arg)
-    if path is None:
-        sys.exit('gh api needs an endpoint')
-    if path == 'graphql':
-        fields = {'query': fields.pop('query'), 'variables': fields}
-    request = urllib.request.Request(os.environ['ACTIONS_HOST'] + '/' + path,
-                                     data=json.dumps(fields).encode(), method=method)
-    try:
-        sys.stdout.buffer.write(urllib.request.urlopen(request).read())
-    except urllib.error.HTTPError as error:
-        sys.exit('HTTP %d: %s' % (error.code, error.read().decode()))
-
-
-if sys.argv[1:2] == ['serve']:
-    serve(Path(sys.argv[2]))
-else:
-    gh(sys.argv[1:])
+if len(sys.argv) != 4 or sys.argv[1] != 'serve':
+    sys.exit('usage: actions_host.py serve STATE WIRE')
+serve(Path(sys.argv[2]), json.loads(Path(sys.argv[3]).read_text()))
