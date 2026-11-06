@@ -123,11 +123,11 @@ fn a_new_head_under_the_actions_token_updates_the_one_standing_comment() {
 }
 
 #[test]
-fn a_person_reading_the_bots_login_keeps_their_comment() {
+fn a_person_sharing_the_bots_login_keeps_their_comment() {
     let host = ActionsHost::new(HEAD_A);
     assert_eq!(host.report(HEAD_A, "first report")["delivered"], true);
     host.update(|state| state["comments"][0]["author"]["__typename"] = json!("User"));
-    let persons = host.state()["comments"][0].clone();
+    let their_comment = host.state()["comments"][0].clone();
 
     let reported = host.report(HEAD_B, "second report");
 
@@ -135,7 +135,7 @@ fn a_person_reading_the_bots_login_keeps_their_comment() {
     let state = host.state();
     let comments = state["comments"].as_array().unwrap();
     assert_eq!(comments.len(), 2, "{comments:#?}");
-    assert_eq!(comments[0], persons);
+    assert_eq!(comments[0], their_comment);
     assert!(
         comments[1]["body"]
             .as_str()

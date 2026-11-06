@@ -52,9 +52,10 @@ def serve(root):
             if 'read_status' in state:
                 return self.fail(state['read_status'], 'read refused')
             variables = payload['variables']
-            # llmlint: ignore[contracts_have_one_source_or_a_drift_gate] AGENTS.md excludes live tests, so no gate can reach GitHub; onevcs owns this wire contract and reads this author type.
+            # llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] AGENTS.md excludes live tests, so no gate can reach GitHub; onevcs owns this wire contract and reads this author type.
             nodes = [dict(id=c['node_id'], databaseId=c['id'], url=c['html_url'], body=c['body'],
                           author={'__typename': 'User', 'login': c['author']}) for c in state['comments']]
+            # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
             self.reply(200, json.dumps({'data': {'viewer': {'login': 'viewer'}, 'repository': {
                 'pullRequest': {'headRefOid': state['head'], 'comments': {
                     'nodes': nodes, 'pageInfo': {'hasNextPage': False, 'endCursor': None}}}}}}
