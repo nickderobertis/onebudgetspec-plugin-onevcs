@@ -32,12 +32,35 @@ const ADVERSE: f64 = 50.0;
 const IMPROVED: f64 = 5.0;
 const OVER: f64 = 200.0;
 
+const EARLIER: &str = "<details><summary>Flags on earlier heads (";
+
+/// The collapsed section core writes for earlier heads' flags, if the body has one.
+fn earlier_section(body: &str) -> Option<&str> {
+    let (_, section) = body.split_once(EARLIER)?;
+    Some(section.split_once("</details>").unwrap().0)
+}
+
+/// One head's lines inside the collapsed earlier-heads section; empty when not listed.
 fn flags_of(body: &str, head: &str) -> String {
-    body.lines()
+    earlier_section(body)
+        .unwrap_or_default()
+        .lines()
         .skip_while(|line| !line.starts_with(head))
         .take_while(|line| line.starts_with(head) || line.starts_with("- "))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The hidden rolling history core embeds in a standing comment.
+fn history_of(body: &str) -> Value {
+    let embedded = body
+        .split_once("<!-- onebudgetspec-history\n")
+        .unwrap()
+        .1
+        .split_once("\n-->")
+        .unwrap()
+        .0;
+    serde_json::from_str(embedded).unwrap()
 }
 
 #[test]
@@ -51,13 +74,12 @@ fn create_update_identical_retry_keep_one_comment_and_visible_adverse_history() 
     let created = host.comment_body(0);
     assert!(created.contains("## Budget report"), "{created}");
     assert!(created.contains("| budgets.yaml / budget-000 (ms) | within | 50.000"));
-    let first_flags = flags_of(&created, HEAD_A);
-    assert!(first_flags.contains("1 adverse flag(s)"), "{created}");
-    assert!(
-        first_flags.contains("- budgets.yaml/budget-000: "),
-        "{created}"
-    );
-    assert!(first_flags.contains(" SD"), "{created}");
+    // The current head's flag is the report's own row; only earlier heads are collapsed.
+    assert_eq!(earlier_section(&created), None, "{created}");
+    assert!(!created.contains("adverse flag(s)"), "{created}");
+    let history = history_of(&created);
+    assert_eq!(history["entries"][0]["head_sha"], HEAD_A);
+    assert_eq!(history["entries"][0]["flags"][0]["id"], "budget-000");
     assert_eq!(host.writes(), 1);
     assert_eq!(
         host.paths().last().unwrap(),
@@ -73,39 +95,59 @@ fn create_update_identical_retry_keep_one_comment_and_visible_adverse_history() 
     assert_eq!(host.comment_body(0), created);
     assert_eq!(host.writes(), 0, "an identical retry writes nothing");
 
-    // A new head that improved: earlier flags stay visible, and it gains none.
+    // A new head that improved: the first head's flag moves into the collapsed section,
+    // and the new head, flagged nowhere, gains no line.
     host.update(|state| state["head"] = json!(HEAD_B));
     let improved = host.report(&input(HEAD_B, 2, 1, IMPROVED));
     assert_eq!(improved.code, Some(0));
     assert!(improved.delivered(), "{}", improved.diagnostics());
     let after_improvement = host.comment_body(0);
-    assert_eq!(flags_of(&after_improvement, HEAD_A), first_flags);
-    let improved_flags = flags_of(&after_improvement, HEAD_B);
     assert!(
-        improved_flags.contains("0 adverse flag(s)"),
+        after_improvement.contains("<details><summary>Flags on earlier heads (1)</summary>"),
         "{after_improvement}"
     );
-    assert!(
-        !improved_flags.contains("- budgets.yaml"),
+    let first_flags = flags_of(&after_improvement, HEAD_A);
+    assert_eq!(
+        first_flags,
+        format!("{HEAD_A} (attempt 1): 1 adverse flag(s)\n- budgets.yaml/budget-000: 24.03 SD"),
         "{after_improvement}"
+    );
+    assert_eq!(flags_of(&after_improvement, HEAD_B), "");
+    assert!(!after_improvement.contains("0 adverse flag(s)"));
+    assert!(
+        after_improvement.find(EARLIER) < after_improvement.find("<!-- onebudgetspec-history"),
+        "the section sits above the hidden history: {after_improvement}"
     );
 
-    // A failing head: its adverse flag joins the rest and the caller's failure stands.
+    // A failing head: the earlier section is unchanged and the caller's failure stands.
     host.update(|state| state["head"] = json!(HEAD_C));
     let failing = host.report(&input(HEAD_C, 3, 1, OVER));
     assert_eq!(failing.code, Some(1), "{}", failing.report);
     assert!(failing.delivered(), "{}", failing.diagnostics());
     let after_failure = host.comment_body(0);
     assert!(after_failure.contains("| budgets.yaml / budget-000 (ms) | over | 200.000"));
+    assert!(after_failure.contains("Flags on earlier heads (1)"));
     assert_eq!(flags_of(&after_failure, HEAD_A), first_flags);
-    assert_eq!(flags_of(&after_failure, HEAD_B), improved_flags);
-    assert!(flags_of(&after_failure, HEAD_C).contains("1 adverse flag(s)"));
+    assert_eq!(flags_of(&after_failure, HEAD_B), "");
+    assert_eq!(
+        flags_of(&after_failure, HEAD_C),
+        "",
+        "the current head is not earlier"
+    );
+    assert_eq!(
+        history_of(&after_failure)["entries"][2]["flags"][0]["id"],
+        "budget-000"
+    );
 
     // A rerun of that head replaces its entry; the earlier attempt cannot regress it.
     let rerun = host.report(&input(HEAD_C, 3, 2, IMPROVED));
     assert_eq!(rerun.code, Some(0));
     let after_rerun = host.comment_body(0);
-    assert!(flags_of(&after_rerun, HEAD_C).contains("(attempt 2): 0 adverse"));
+    let rerun_entry = &history_of(&after_rerun)["entries"][2];
+    assert_eq!(rerun_entry["head_sha"], HEAD_C);
+    assert_eq!(rerun_entry["attempt"], 2);
+    assert_eq!(rerun_entry["flags"], json!([]));
+    assert_eq!(flags_of(&after_rerun, HEAD_A), first_flags);
     host.clear_requests();
     let late = host.report(&input(HEAD_C, 3, 1, OVER));
     assert_eq!(
@@ -119,6 +161,76 @@ fn create_update_identical_retry_keep_one_comment_and_visible_adverse_history() 
     let state = host.state();
     assert_eq!(state["comments"].as_array().unwrap().len(), 1);
     assert_eq!(state["description"], "unrelated description");
+}
+
+#[test]
+fn heads_that_carry_no_flags_post_no_earlier_heads_section() {
+    let host = Host::new(HEAD_A);
+    for (head, run) in [(HEAD_A, 1), (HEAD_B, 2), (HEAD_C, 3)] {
+        host.update(|state| state["head"] = json!(head));
+        let reported = host.report(&input(head, run, 1, IMPROVED));
+        assert_eq!(reported.code, Some(0), "{}", reported.report);
+        assert!(reported.delivered(), "{}", reported.diagnostics());
+        let body = host.comment_body(0);
+        assert!(!body.contains("Flags on earlier heads"), "{body}");
+        assert!(!body.contains("<details>"), "{body}");
+        assert!(!body.contains("adverse flag(s)"), "{body}");
+        assert_eq!(
+            history_of(&body)["entries"].as_array().unwrap().len(),
+            run as usize
+        );
+    }
+    assert_eq!(host.state()["comments"].as_array().unwrap().len(), 1);
+}
+
+/// What the v0.1.1 plugin (core 0.1.6) posted for a flagged head, then an unflagged one,
+/// captured from that release's binary against this host double.
+const V0_1_1_BODY: &str = concat!(
+    "## Budget report\n\nhead: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n\n",
+    "### Per-head adverse flags\n\n",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (attempt 1): 1 adverse flag(s)\n",
+    "- budgets.yaml/latency: 2.50 SD\n\n",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (attempt 1): 0 adverse flag(s)\n",
+    "<!-- onebudgetspec-history\n",
+    r#"{"schema_version":1,"entries":[{"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","run_id":"1","run_url":"https://github.com/owner/repo/actions/runs/1","attempt":1,"flags":[{"file":"budgets.yaml","id":"latency","sigma_change":2.5,"constant_baseline_change":false}]},{"head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","run_id":"2","run_url":"https://github.com/owner/repo/actions/runs/2","attempt":1,"flags":[]}],"omitted_heads":0}"#,
+    "\n-->\n\n",
+    "<!-- onevcs:standing-comment:v1:d8992162ab96e90c64661d4880f7a0b0d10f8085a51dd0c200d2438ed7f46601 -->",
+);
+
+#[test]
+fn a_comment_the_previous_release_posted_is_updated_in_place_with_its_flags_carried() {
+    let host = Host::new(HEAD_C);
+    let previous = json!({
+        "id": 100, "node_id": "owned-100", "author": "viewer", "body": V0_1_1_BODY,
+        "html_url": "https://github.com/owner/repo/pull/1#issuecomment-100",
+    });
+    host.update(|state| state["comments"] = json!([previous]));
+
+    let reported = host.report(&input(HEAD_C, 3, 1, IMPROVED));
+    assert_eq!(reported.code, Some(0), "{}", reported.report);
+    assert!(reported.delivered(), "{}", reported.diagnostics());
+    let state = host.state();
+    let comments = state["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 1, "no second comment: {comments:?}");
+    assert_eq!(comments[0]["id"], 100);
+    assert_eq!(host.writes(), 1);
+
+    let body = host.comment_body(0);
+    assert!(!body.contains("### Per-head adverse flags"), "{body}");
+    assert!(body.contains("Flags on earlier heads (1)"), "{body}");
+    assert_eq!(
+        flags_of(&body, HEAD_A),
+        format!("{HEAD_A} (attempt 1): 1 adverse flag(s)\n- budgets.yaml/latency: 2.50 SD")
+    );
+    assert_eq!(flags_of(&body, HEAD_B), "");
+    assert!(!body.contains("0 adverse flag(s)"), "{body}");
+    let heads: Vec<_> = history_of(&body)["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["head_sha"].clone())
+        .collect();
+    assert_eq!(heads, [HEAD_A, HEAD_B, HEAD_C]);
 }
 
 #[test]
@@ -142,11 +254,22 @@ fn overflow_drops_the_oldest_heads_with_notice_and_stays_within_the_host_limit()
         body = report(head, 2 + index as u64);
     }
     assert!(body.chars().count() <= 65_536, "{}", body.chars().count());
-    assert!(body.contains("oldest history head(s) omitted to fit host capacity"));
-    assert!(flags_of(&body, HEAD_C).contains("300 adverse flag(s)"));
+    // Both earlier heads were dropped; the notice sits in the collapsed section.
+    let section = earlier_section(&body).unwrap_or_else(|| panic!("{body}"));
     assert!(
-        !flags_of(&body, HEAD_A).contains("adverse"),
-        "oldest head is gone"
+        section.contains("2 oldest history head(s) omitted to fit host capacity"),
+        "{body}"
+    );
+    assert!(body.contains("Flags on earlier heads (0)"), "{body}");
+    assert_eq!(flags_of(&body, HEAD_A), "", "oldest head is gone");
+    assert_eq!(flags_of(&body, HEAD_B), "", "oldest head is gone");
+    let history = history_of(&body);
+    assert_eq!(history["omitted_heads"], 2);
+    assert_eq!(history["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(history["entries"][0]["head_sha"], HEAD_C);
+    assert_eq!(
+        history["entries"][0]["flags"].as_array().unwrap().len(),
+        300
     );
     assert_eq!(host.state()["comments"].as_array().unwrap().len(), 1);
 }
@@ -337,15 +460,7 @@ fn imported_protocol_shapes_conform_to_the_published_schema_bundle() {
     assert_conforms("delivery-result", &delivered);
 
     // The history core embeds round-trips through the plugin as core's own type.
-    let body = host.comment_body(0);
-    let embedded = body
-        .split_once("<!-- onebudgetspec-history\n")
-        .unwrap()
-        .1
-        .split_once("\n-->")
-        .unwrap()
-        .0;
-    let history: Value = serde_json::from_str(embedded).unwrap();
+    let history = history_of(&host.comment_body(0));
     assert_conforms("report-history", &history);
     assert_eq!(history["entries"][0]["head_sha"], HEAD_A);
 
