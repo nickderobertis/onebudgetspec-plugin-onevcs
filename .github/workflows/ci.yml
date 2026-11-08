@@ -37,7 +37,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-llvm-cov,cargo-nextest,shellcheck
+          tool: just,cargo-llvm-cov,cargo-nextest,shellcheck,release-plz
       - uses: actions/setup-go@v6
         with:
           go-version: stable
@@ -64,7 +64,7 @@ jobs:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-llvm-cov,cargo-nextest,shellcheck
+          tool: just,cargo-llvm-cov,cargo-nextest,shellcheck,release-plz
       - uses: actions/setup-go@v6
         with:
           go-version: stable

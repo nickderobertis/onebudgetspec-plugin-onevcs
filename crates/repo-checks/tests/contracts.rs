@@ -560,3 +560,80 @@ fn cargo_projects_coverage_and_contract_inputs_agree() {
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("must remain leaves"));
 }
+
+/// Every requirement another workspace crate shares with the published crate, where it
+/// differs from the published crate's: `crate dependency: theirs != published`.
+fn requirement_drift(metadata: &serde_json::Value) -> Vec<String> {
+    let packages = metadata["packages"].as_array().unwrap();
+    let published = packages
+        .iter()
+        .find(|p| p["name"] == "onebudgetspec-plugin-onevcs")
+        .unwrap();
+    let mut drift = Vec::new();
+    for other in packages.iter().filter(|p| p["name"] != published["name"]) {
+        for theirs in other["dependencies"].as_array().unwrap() {
+            for ours in published["dependencies"].as_array().unwrap() {
+                if ours["name"] == theirs["name"] && ours["req"] != theirs["req"] {
+                    drift.push(format!(
+                        "{} {}: {} != {}",
+                        other["name"].as_str().unwrap(),
+                        theirs["name"].as_str().unwrap(),
+                        theirs["req"],
+                        ours["req"]
+                    ));
+                }
+            }
+        }
+    }
+    drift
+}
+
+/// The published crate declares its public-API dependencies itself rather than inheriting
+/// them, so the e2e crate's requirement on the same crate cannot follow it automatically:
+/// the two must name the same requirement, or the journeys prove a different version.
+#[test]
+fn shared_dependency_requirements_match_the_published_crate() {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1", "--locked"])
+        .current_dir(root())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let mut metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        requirement_drift(&metadata),
+        Vec::<String>::new(),
+        "align each requirement with crates/onebudgetspec-plugin-onevcs/Cargo.toml"
+    );
+    let published = metadata["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "onebudgetspec-plugin-onevcs")
+        .unwrap()["dependencies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "onebudgetspec-core")
+        .unwrap()["req"]
+        .clone();
+    let e2e = metadata["packages"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|p| p["name"] == "onebudgetspec-plugin-onevcs-e2e")
+        .unwrap();
+    let core = e2e["dependencies"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|d| d["name"] == "onebudgetspec-core")
+        .expect("the e2e crate proves the published crate against onebudgetspec-core");
+    core["req"] = serde_json::json!("^0.1.6");
+    assert_eq!(
+        requirement_drift(&metadata),
+        [format!(
+            "onebudgetspec-plugin-onevcs-e2e onebudgetspec-core: \"^0.1.6\" != {published}"
+        )]
+    );
+}

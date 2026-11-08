@@ -3,7 +3,11 @@
 publish = false
 release_always = true
 features_always_increment_minor = true
-release_commits = "^(feat|fix|perf|refactor|build)(\\([^)]+\\))?!?:"
+# The second alternative is the commit release-plz synthesizes when only a requirement the
+# published crate inherits from the workspace changed: that adoption commit never touches
+# the crate's directory, so release-plz never reads it. Dependencies in the crate's public
+# API are declared in its own manifest instead, so their adoption's own type sets the bump.
+release_commits = "^((feat|fix|perf|refactor|build)(\\([^)]+\\))?!?:|chore: update Cargo\\.toml dependencies$)"
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 semver_check = false
@@ -27,5 +31,6 @@ commit_parsers = [
  { message = "^perf", group = "Performance" },
  { message = "^refactor", group = "Changed" },
  { message = "^build", group = "Build" },
+ { message = "^chore: update Cargo\\.toml dependencies$", group = "Dependencies" },
  { message = ".*", skip = true },
 ]
