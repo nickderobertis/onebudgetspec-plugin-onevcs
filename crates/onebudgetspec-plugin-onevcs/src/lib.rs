@@ -10,6 +10,12 @@
 //!
 //! A transport failure is an answer rather than a change to a budget verdict: neither
 //! module reads or alters one.
+//!
+//! # Compatibility
+//!
+//! Since 0.2.0 this crate requires `onebudgetspec-core` 0.2. Because its public API takes
+//! and returns core types, that is a breaking change: a consumer still on
+//! `onebudgetspec-core` 0.1 must move to 0.2 together with this crate.
 
 pub mod history;
 pub mod reporter;
