@@ -13,9 +13,10 @@
 //!
 //! # Compatibility
 //!
-//! Since 0.2.0 this crate requires `onebudgetspec-core` 0.2. Because its public API takes
-//! and returns core types, that is a breaking change: a consumer still on
-//! `onebudgetspec-core` 0.1 must move to 0.2 together with this crate.
+//! This crate requires `onebudgetspec-core` 0.2. Because its public API takes and returns
+//! core types, that is a breaking change: a consumer still on `onebudgetspec-core` 0.1 must
+//! move to 0.2 together with this crate. Release 0.1.2 already carried that requirement
+//! though published as a patch; 0.2.0 is the release that marks it as breaking.
 
 pub mod history;
 pub mod reporter;
