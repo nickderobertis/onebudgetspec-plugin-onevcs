@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Set up from a clean clone: the locked crates, Nx's locked Node toolchain, the pinned
-# Rust toolchain, and cargo-llvm-cov.
+# Rust toolchain, cargo-llvm-cov, and release-plz (the release-versioning tests run it).
 bootstrap: fetch setup-onevcs
     @bash scripts/bootstrap.sh
 

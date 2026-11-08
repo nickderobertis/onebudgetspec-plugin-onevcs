@@ -12,11 +12,15 @@ include = ["src/**", "Cargo.toml", "CHANGELOG.md", "../../README.md", "../../LIC
 name = "onebudgetspec-plugin-onevcs"
 path = "src/main.rs"
 
+# Dependencies whose types or trait impls appear in this crate's public API are declared
+# here, not inherited from the workspace: adopting a new version then changes this
+# directory, so its commit's conventional type decides the release (feat!/fix! for a
+# breaking adoption). Shared requirements are kept in step by repo-checks.
 [dependencies]
+onebudgetspec-core = "0.2.1"
+onevcs = "0.61.1"
+serde = { version = "1", features = ["derive"] }
 clap.workspace = true
-onebudgetspec-core.workspace = true
-onevcs.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 zip.workspace = true
